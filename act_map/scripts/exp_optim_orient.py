@@ -75,7 +75,6 @@ def preprocessing(results):
     results['det']['nvalues'] =\
         eu.normalize(np.log(results['det']['values']))
 
-
 init(autoreset=True)
 rospack = rospkg.RosPack()
 
@@ -144,6 +143,9 @@ points = np.loadtxt(abs_trace_dir + "/map_points" + ext)
                                      # abs_trace_dir, view_pre, val_pre, ext)
 # worst_trace_res = loadViewAndValues('trace_appr_worst',
                                     # abs_trace_dir, view_pre, val_pre, ext)
+
+
+
 
 quad_app_res = {}
 gp_app_res = {}
@@ -280,79 +282,6 @@ else:
             ax.set_zticklabels([])
             axes.append(ax)
             index += 1
-
-    # ax = fig.add_subplot(331, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, quad_app_res['mineig'],
-    #         r'$\sigma_{min}(I)$ Approx.')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
-    # ax = fig.add_subplot(332, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, quad_app_res['det'],
-    #         r'$Det(I)$ Approx.')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
-    # ax = fig.add_subplot(333, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, quad_app_res['trace'],
-    #         r'$Tr(I)$ Approx.')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
-    # ax = fig.add_subplot(334, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, gp_app_res['mineig'],
-    #         r'$\sigma_{min}(I)$ GP Approx.')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
-    # ax = fig.add_subplot(335, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, gp_app_res['det'],
-    #         r'$Det(I)$ GP Approx.')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
-    # ax = fig.add_subplot(336, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, gp_app_res['trace'],
-    #         r'$Tr(I)$ GP Approx.')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
-    # ax = fig.add_subplot(337, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, gt_res['mineig'],
-    #         r'$\sigma_{min}(I)$ Exact')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
-    # ax = fig.add_subplot(338, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, gt_res['det'],
-    #         r'$Det(I)$ Exact')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
-    # ax = fig.add_subplot(339, projection='3d')
-    # plotSingle(ax, vox_pos, points, args.xrange, gt_res['trace'],
-    #         r'$Tr(I)$ Exact')
-    # ax.set_xticklabels([])
-    # ax.set_yticklabels([])
-    # ax.set_zticklabels([])
-    # axes.append(ax)
-
 
 plt.tight_layout()
 if args.animated:

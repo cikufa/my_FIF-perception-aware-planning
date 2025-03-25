@@ -17,6 +17,8 @@ public:
 
   size_t n_points_ = 0;
   Eigen::Matrix<double, 3, Eigen::Dynamic> points_;
+  /*ADDED:*/
+  Eigen::Matrix<double, 3, Eigen::Dynamic> normalized_points_;
   std::vector<bool> is_fixed_;
   std::vector<int> points_ids_;
 

@@ -13,6 +13,14 @@
 #include "act_map/sampler.h"
 #include "act_map/conversion.h"
 
+/*ADDED:*/
+// #include "act_map/cloud_loader.h"
+// #include "act_map/manifold.h"
+// #include "act_map/experiment_manager.h"
+// #include "act_map/trajectory_optimizer.h"
+// #include "act_map/monte_carlo.h"
+
+
 DEFINE_string(abs_map, "", "absolute path of the map file.");
 DEFINE_string(abs_trace_dir, "", "trace dir to save results");
 
@@ -27,15 +35,52 @@ DEFINE_double(check_ratio, 0.05, "ratio of voxels to compute.");
 using namespace act_map;
 using namespace act_map::optim_orient;
 
+
+
+/*ADDED:*/
+/*cast Eigen::Matrix<double, 3, Eigen::Dynamic> to std::vector<Eigen::Vector3f>*/
+std::vector<Eigen::Vector3f> castEigenMatrixToStdVector(const Eigen::Matrix<float, 3, Eigen::Dynamic>& matrix) {
+    std::vector<Eigen::Vector3f> vec_list;
+    vec_list.reserve(matrix.cols());  // Reserve space for efficiency
+
+    for (int i = 0; i < matrix.cols(); ++i) {
+        vec_list.push_back(matrix.col(i));  // No need to cast anymore
+    }
+    return vec_list;    
+}
+
+Eigen::Matrix<double, 3, Eigen::Dynamic> my_populate_local_indexes(
+    const Eigen::Matrix<double, 3, Eigen::Dynamic>& map_points,
+    const Eigen::Vector3d& ref_point) {
+    
+		Eigen::Matrix<double, 3, Eigen::Dynamic> normalized_points(3, map_points.cols());
+		
+		for (int i = 0; i < map_points.cols(); ++i) {
+			Eigen::Vector3d point_pos = map_points.col(i) - ref_point;
+			point_pos /= point_pos.norm();
+			normalized_points.col(i) = point_pos;
+		}
+		
+		return normalized_points;
+	}
+
+
+std::pair<Eigen::Vector3d, Eigen::Vector3d> my_calculate_pointcloud_mean(const Eigen::Matrix<double, 3, Eigen::Dynamic>& map_points_) {
+		Eigen::Vector3d total = Eigen::Vector3d::Zero();
+		
+		for (int i = 0; i < map_points_.cols(); ++i) {
+			total += map_points_.col(i);
+		}
+		Eigen::Vector3d totalme = total/ static_cast<double>(map_points_.cols()); 
+		Eigen::Vector3d totalchen = total/ total.norm();
+		return std::make_pair(totalme, totalchen);
+  	}
+
+
 RPG_COMMON_MAIN
 {
   CHECK(!FLAGS_abs_map.empty());
   CHECK(!FLAGS_abs_trace_dir.empty());
-
-  std::cout << "This is to test whether the map can be used to select motion. "
-               "In this case, we select the optimal orientation at each point. "
-               "Samples on SO3 are checked to find the optimal orientation."
-               "\n";
 
   std::cout << "Experiment parameters:\n"
             << "- abs_map: " << FLAGS_abs_map << std::endl
@@ -47,17 +92,19 @@ RPG_COMMON_MAIN
             << "- angel_res_deg: " << FLAGS_angle_res_deg << std::endl
             << "- check_ratio: " << FLAGS_check_ratio << std::endl;
 
+
   std::srand(std::time(nullptr));
   std::random_device rd;
   std::mt19937 rng(rd());
 
+ /* TODO: Pinhole cam*/
   rpg::Pose Tbc;
   Tbc.setIdentity();
   vi::PinholeCam cam({ 300, 300, 300, 300, 600, 600 }, Tbc);
   VLOG(1) << "Simulated a camera:\n" << cam;
 
   double hfov_rad = M_PI_4;
-  QuadraticVisScore vscore(hfov_rad);
+  QuadraticVisScore vscore( hfov_rad);
   vscore.initSecondOrderApprox(0.8, 0.8);
 
   std::string dir;
@@ -68,6 +115,7 @@ RPG_COMMON_MAIN
 //                                     "fov45_fs30_lm1000_k10";
 //                                     "fov45_fs50_lm1000_k10_fast";
                                      "fov45_fs70_lm1000_k15";
+  /*TODO:*/ 
   VLOG(1) << "Loading GP visibility profile at " << gp_vis_profile;
   VisApproxPtr<GPVisApprox> gp_vis_ptr =
       std::make_shared<GPVisibilityApproximator>();
@@ -87,15 +135,20 @@ RPG_COMMON_MAIN
   utils::generateUniformPointsWithin(FLAGS_vox_res, FLAGS_xrange, FLAGS_yrange,
                                      FLAGS_zrange, &uniform_grid);
   const size_t kNPts = uniform_grid.size();
-  const size_t kNCompute = static_cast<size_t>(FLAGS_check_ratio * kNPts);
+  /*ADDED: kncopm[ute 5]*/
+  const size_t kNCompute = static_cast<size_t>(FLAGS_check_ratio * kNPts/4);
+  // const size_t kNCompute = 20;
+
   std::uniform_int_distribution<size_t> pts_uni(0, kNPts - 1);
+  /*TODO:*/ 
   VLOG(1) << "Random sampling voxel positions...";
-  rpg::PositionVec vox_pos;
+  /*NOTE:*/ rpg::PositionVec vox_pos;
+  
   for (size_t i = 0; i < kNCompute; i++)
   {
     vox_pos.emplace_back(uniform_grid[pts_uni(rng)]);
   }
-
+TODO:/* kernel initializaton */
   VLOG(1) << "Computing the kernels for " << kNCompute << " random voxels...";
   // quadratic kernels
   InfoK1Vec info_k1_vec(kNCompute);
@@ -113,6 +166,57 @@ RPG_COMMON_MAIN
   double tbuild_trace = 0;
   double tbuild_gp_info = 0;
   double tbuild_gp_trace = 0;
+
+  /*---------------------------------------------------------FOV init variables----------------------------------------------*/
+
+  /*ADDED:*/
+  
+  // FovOptimizerOnManifold *manifold;
+ 	// CloudLoader *loader;
+ 	// float avg_time;
+ 	// float optimizer_monte_carlo_total_time_us; //us
+ 	// float optimizer_monte_carlo_average_time_us; //us
+ 	// float brute_force_search_total_time_us;
+  // float brute_force_search_average_time_us;
+
+  // std::vector<float> degree_diff_record;
+  // std::string prefix;
+
+ 	// std::ofstream quiversfile;
+  // std::ofstream mean;
+ 	// std::ofstream brute_force_quiversfile;
+ 	// std::ofstream montecarlopointsfile;
+ 	// std::ofstream optimizer_avg_time_file;
+ 	// std::ofstream brute_force_avg_time_file;
+ 	// std::ofstream optimizer_accuracy_file;
+
+  
+  // quiversfile.open("src/rpg_information_field/act_map/FOVData/myquivers.csv");
+  // mean.open("src/rpg_information_field/act_map/FOVData/mean.csv" , std::ios::app);
+  // // std::ofstream starting_c_debug;
+  // // starting_c_debug.open("rpg_information_field/act_map/FOVData/starting_c_debug.csv");
+  // brute_force_quiversfile.open("src/rpg_information_field/act_map/FOVData/single_run_brute_force_rotated_quivers.csv");
+  // montecarlopointsfile.open("src/rpg_information_field/act_map/FOVData/montecarlo_points.csv");
+  // optimizer_avg_time_file.open("src/rpg_information_field/act_map/FOVData/optimizer_avg_time_file.csv");
+  // brute_force_avg_time_file.open("src/rpg_information_field/act_map/FOVData/brute_force_avg_time_file.csv");
+  // optimizer_accuracy_file.open("src/rpg_information_field/act_map/FOVData/optimizer_accuracy_file.csv");
+
+  // // rpg::PositionVec 
+  // Eigen::Vector3d ref_point, starting_c,origin, mean_center_of_all_pointsme, mean_center_of_all_pointsch;
+  // Eigen::Vector3f starting_c_casted, ref_point_casted;
+  // std::vector<Eigen::Vector3f> points_list_casted;
+  // Eigen::Vector3f quiver_head;
+  // Eigen::Vector3f brute_force_quiver_head;
+  // origin<<0,0,0;
+
+	// optimizer_monte_carlo_total_time_us=0;
+	// optimizer_monte_carlo_average_time_us=0;
+	// brute_force_search_total_time_us=0;
+	// brute_force_search_average_time_us=0;
+  // prefix="prefix";
+  /*--------------------------------------------------------------------------------------------------------------------*/
+
+
   for (size_t i = 0; i < kNCompute; i++)
   {
     if (i > cnt_r * kNCompute)
@@ -121,6 +225,7 @@ RPG_COMMON_MAIN
       cnt_r += 0.1;
     }
     timer.start();
+    /*Computes info kernels (can be later processed for fif calc) */
     constructFactorBatch(map.points_, vox_pos[i], &(info_k1_vec[i]),
                          &(info_k2_vec[i]), &(info_k3_vec[i]));
     tbuild_info += timer.stop();
@@ -135,7 +240,66 @@ RPG_COMMON_MAIN
     timer.start();
     constructFactorVoxelBatch(map.points_, vox_pos[i], &(gp_trace_vec[i]));
     tbuild_gp_trace += timer.stop();
+
+    /* ADDED:++++++++++++++++++++++++++++++++++++++++++++++++MONTE CARLO ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
+		ref_point = vox_pos[i];
+    map.normalized_points_ = my_populate_local_indexes(map.points_, ref_point); //normalize map according to ref point
+    std::tie(mean_center_of_all_pointsme, mean_center_of_all_pointsch) = my_calculate_pointcloud_mean(map.points_);
+    mean<< std::to_string(mean_center_of_all_pointsme[0])<<","<< std::to_string(mean_center_of_all_pointsme[1])<<","<<std::to_string(mean_center_of_all_pointsme[2])<<","<<std::to_string(mean_center_of_all_pointsch[0])<<","<< std::to_string(mean_center_of_all_pointsch[1])<<","<< std::to_string(mean_center_of_all_pointsch[2])<<std::endl;
+    starting_c=mean_center_of_all_pointsme-ref_point;    
+    // /*NOTE:cast*/   
+    starting_c_casted = starting_c.cast<float>();
+    points_list_casted = castEigenMatrixToStdVector(map.normalized_points_.cast<float>());
+    ref_point_casted = ref_point.cast<float>();
+
+    manifold=new FovOptimizerOnManifold("FOV_30degree.pdf",true,15.0,true,points_list_casted,starting_c_casted,true, ref_point_casted);
+		// VLOG(1) << "-----------------after manifold";
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+		manifold->optimize();
+		std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+		// std::cout << "Optimizer Time Difference = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;	
+		int time_us=std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+		optimizer_monte_carlo_total_time_us+=(float)time_us;
+		optimizer_avg_time_file<<std::to_string((float)time_us)<<std::endl;
+
+		quiver_head=(manifold->get_R())*starting_c_casted;    /*rpg::PositionVec*/
+    quiver_head=quiver_head/quiver_head.norm();
+    // starting_c_debug << starting_c<<","<< starting_c_casted<<std::endl;
+
+    quiversfile << std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(quiver_head[0])<<","<< std::to_string(quiver_head[1])<<","<< std::to_string(quiver_head[2])<<std::endl;
+    // std::cout<< "testttttttttt" <<std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(quiver_head[0])<<","<< std::to_string(quiver_head[1])<<","<< std::to_string(quiver_head[2])<<std::endl;
+
+    //----------------------------------------------------Brute Force-------------------------------------------
+    begin = std::chrono::steady_clock::now();
+    manifold->brute_force_search();
+    end = std::chrono::steady_clock::now();
+    std::cout << "Brute Forceeeeeeeeeeeeeeeeeeee Time Difference = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;	
+    time_us=std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+    brute_force_search_total_time_us+=(float)time_us;				
+    brute_force_avg_time_file<<std::to_string((float)time_us)<<std::endl;
+    brute_force_quiver_head=manifold->get_brute_force_best_vector();
+
+    float degree_between =acos(brute_force_quiver_head.transpose()*quiver_head)*180.0/M_PI;
+    // std::cout << "quiver_head" << quiver_head <<std::endl;
+    // print_string("degree_between");
+    // print_float(degree_between);
+    degree_diff_record.push_back(degree_between);
+    optimizer_accuracy_file<<std::to_string(degree_between)<<","<<std::to_string(manifold->get_brute_force_max_feature())<<","<<std::to_string(manifold->get_optimized_max_feature())<<","<<std::endl;
+    brute_force_quiversfile<< std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(brute_force_quiver_head[0])<<","<< std::to_string(brute_force_quiver_head[1])<<","<< std::to_string(brute_force_quiver_head[2])<<std::endl;
+    
+    delete manifold;
+
   }
+  brute_force_search_average_time_us=brute_force_search_total_time_us/kNCompute;  //  /(x_resolution*y_resolution*z_resolution);
+	brute_force_avg_time_file<<std::to_string(brute_force_search_average_time_us)<<std::endl;
+	// std::cout<<"brute_force_monte_carlo_average_time is "<<brute_force_search_average_time_us<<" [us]"<<std::endl;
+
+	optimizer_monte_carlo_average_time_us=optimizer_monte_carlo_total_time_us/kNCompute; // /(x_resolution*y_resolution*z_resolution);
+	// std::cout<<"optimizer_monte_carlo_average_time is "<<optimizer_monte_carlo_average_time_us<<" [us]"<<std::endl;
+	optimizer_avg_time_file<<std::to_string(optimizer_monte_carlo_average_time_us)<<std::endl;
+
+  quiversfile.close();
+
   VLOG(1) << "Done computing the kernels.";
 
   VLOG(1) << "Sampling rotations...";
@@ -165,7 +329,7 @@ RPG_COMMON_MAIN
              " information.";
   cnt_r = 0.0;
   std::map<InfoMetricType, double> quad_appr_times{
-    { InfoMetricType::kMinEig, 0 },
+    { InfoMetricType::kMinEig, 0 }, 
     { InfoMetricType::kDet, 0 },
     { InfoMetricType::kTrace, 0 }
   };
