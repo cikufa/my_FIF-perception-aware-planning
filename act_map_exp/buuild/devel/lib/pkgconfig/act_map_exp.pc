@@ -1,8 +1,0 @@
-prefix=/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map_exp/buuild/devel
-
-Name: act_map_exp
-Description: Description of act_map_exp
-Version: 0.0.0
-Cflags: -I/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map_exp/buuild/devel/include -I/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map_exp/include
-Libs: -L${prefix}/lib -lact_map_exp
-Requires: catkin_simple act_map_ros voxblox_ros mav_trajectory_generation message_generation message_runtime std_msgs geometry_msgs
