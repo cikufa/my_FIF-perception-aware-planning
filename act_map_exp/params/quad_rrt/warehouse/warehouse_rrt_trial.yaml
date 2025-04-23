@@ -44,4 +44,4 @@ rrt_cost:
   - Dist: 1.0
 # - Info: 1.0
 
-save_abs_dir: /home/zichao/sources/FIF_ws/src/rpg_information_field/act_map_exp/trace/quad_rrt/warehouse_trial
+save_abs_dir: /home/shekoufeh/FIF_ws/src/rpg_information_field/act_map_exp/trace/rrt/warehouse_trial

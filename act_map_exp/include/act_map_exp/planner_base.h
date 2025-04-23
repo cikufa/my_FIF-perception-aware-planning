@@ -28,6 +28,122 @@ public:
 
   inline virtual void plan()
   {
+    // final_Twb_vec_.clear();
+    // consec_lower_than_thresh_cnt_ = 0;
+    VLOG(1) << "Start RRT plan.";
+    const size_t n_iter_prev = rrt_stats_.size();
+    for (int cur_iter = 0; cur_iter < max_n_iter_; cur_iter++)
+    {
+      const int total_iter = cur_iter + 1 + n_iter_prev;
+      VLOG(1) << "========= Iter. " << total_iter << " =========";
+      ob::PlannerStatus solve_res = planner_->ob::Planner::solve(iter_time_sec_);
+      if (solve_res)
+      {
+        CHECK(pdef_->hasSolution());
+        has_valid_solution_ = true;
+  
+        if (!pdef_->hasExactSolution())
+        {
+          LOG(WARNING) << "Do not have exact solution.";
+        }
+        else
+        {
+          has_exact_solution_ = true;
+        }
+  
+        const int cur_n_iter =
+            planner_->as<ompl::geometric::RRTstar>()->numIterations();
+        const double cur_best_cost =
+            planner_->as<ompl::geometric::RRTstar>()->bestCost().value();
+        planner_->as<ompl::geometric::RRTstar>()->getPlannerData(*planner_data_);
+  
+        VLOG(1) << "=====> Iter. " << total_iter << " succeeds: ";
+        VLOG(1) << "- The best cost is " << cur_best_cost;
+        VLOG(1) << "- The number of iteration is " << cur_n_iter;
+        VLOG(1) << "- Has " << pdef_->getSolutionCount() << " solutions.";
+        VLOG(1) << "- Has " << planner_data_->numEdges() << " edges.";
+        VLOG(1) << "- Has " << planner_data_->numVertices() << " vertices.";
+        const double prev_best_cost = rrt_stats_.lastBestCost();
+  
+        VLOG(1) << "- Log RRT stats...";
+        rrt_stats_.n_iters_.push_back(cur_n_iter);
+        rrt_stats_.best_costs_.push_back(cur_best_cost);
+        rrt_stats_.n_verts_.push_back(planner_data_->numVertices());
+        rrt_stats_.n_edges_.push_back(planner_data_->numEdges());
+        act_map::Vec3dVec vertices;
+        ompl_utils::getVerticesFromPlannerData(planner_data_, &vertices);
+        Eigen::MatrixX3d vert_mat;
+        act_map::VecKVecToEigenXK(vertices, &vert_mat);
+        rrt_stats_.vertices_.push_back(vert_mat);
+        Eigen::MatrixX2i pairs;
+        pairs.resize(planner_data_->numEdges(), Eigen::NoChange);
+        int pair_i = 0;
+        for (size_t start_i = 0; start_i < planner_data_->numVertices();
+             start_i++)
+        {
+          std::vector<unsigned int> end_indices;
+          planner_data_->getEdges(start_i, end_indices);
+          for (size_t end_i = 0; end_i < end_indices.size(); end_i++)
+          {
+            pairs(pair_i, 0) = static_cast<int>(start_i);
+            pairs(pair_i, 1) = static_cast<int>(end_i);
+            pair_i++;
+          }
+        }
+        rrt_stats_.edge_pairs_.push_back(pairs);
+  
+        if (!std::isfinite(prev_best_cost) || !std::isfinite(cur_best_cost))
+        {
+          VLOG(1) << "- Either of the prev. or cur. cost is not finite.";
+          consec_lower_than_thresh_cnt_ = 0;
+        }
+        else
+        {
+          const double ratio =
+              std::fabs(cur_best_cost - prev_best_cost) / prev_best_cost;
+          VLOG(1) << "- Cost reduction is " << ratio;
+          if (ratio < converge_ratio_)
+          {
+            consec_lower_than_thresh_cnt_++;
+          }
+          else
+          {
+            consec_lower_than_thresh_cnt_ = 0;
+          }
+        }
+  
+        constexpr int kMinConsecRed = 2;
+        VLOG(1) << "- consecutive reduction cnt. "
+                << consec_lower_than_thresh_cnt_;
+        if (cur_iter >= min_n_iter_)
+        {
+          if (consec_lower_than_thresh_cnt_ >= kMinConsecRed)
+          {
+            VLOG(1) << "Consecutive " << kMinConsecRed
+                    << " iterations reduce the cost under threshold, stop.";
+            break;
+          }
+        }
+  
+        if (viz_every_outer_iter_)
+        {
+          VLOG(1) << "Visualize current results...";
+          extractRRTPathPoses();
+          visualize();
+        }
+      }
+      else
+      {
+        LOG(WARNING) << "XXXXX> Solve failed for iter " << total_iter;
+      }
+    }
+  
+    if (has_valid_solution_)
+    {
+      VLOG(1) << "Solve successfully!";
+      extractRRTPathPoses();
+      VLOG(1) << "Get " << final_Twb_vec_.size() << " vertices.";
+    }
     LOG(WARNING) << "Base planner plan() function called.";
   }
 
