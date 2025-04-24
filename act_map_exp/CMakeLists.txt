@@ -15,6 +15,8 @@ set(HEADERS
   include/act_map_exp/quad_traj_opt_impl.h
   include/act_map_exp/quad_rrt.h
   include/act_map_exp/quad_rrt_impl.h
+  include/act_map_exp/my_rrt.h
+  include/act_map_exp/my_rrt_impl.h
   include/act_map_exp/exp_utils.h
   include/act_map_exp/numdiff-jacobian-tester.h
   include/act_map_exp/potential_cost.h
@@ -27,17 +29,20 @@ set(SOURCES
   src/planner_base.cpp
   src/quad_traj_opt.cpp
   src/quad_rrt.cpp
+ # src/my_rrt.cpp
   src/exp_utils.cpp
   src/potential_cost.cpp
   src/viz_utils.cpp
   src/poly_traj_helper.cpp
-  src/my_rrt.cpp
   )
 
 cs_add_library(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 target_link_libraries(${PROJECT_NAME} yaml-cpp ${OMPL_LIBRARIES} ${CERES_LIBRARIES})
 
 # nodes
+cs_add_executable(my_rrt_node src/my_rrt_node.cpp)
+target_link_libraries(my_rrt_node ${PROJECT_NAME})
+
 cs_add_executable(planner_base_node src/planner_base_node.cpp)
 target_link_libraries(planner_base_node ${PROJECT_NAME})
 
