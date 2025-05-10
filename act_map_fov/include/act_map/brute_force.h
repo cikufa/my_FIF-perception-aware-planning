@@ -1,0 +1,2 @@
+add_library(bruteforce brute_force.h)
+set_target_properties(bruteforce PROPERTIES LINKER_LANGUAGE CXX)
