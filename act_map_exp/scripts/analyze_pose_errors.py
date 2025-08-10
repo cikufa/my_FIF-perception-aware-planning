@@ -21,7 +21,6 @@ rc('text', usetex=True)
 def _replaceNan(values, rep):
     return [rep if math.isnan(v) else v for v in values]
 
-
 def _loadPoses(pose_fn):
     times = []
     Twc = []
