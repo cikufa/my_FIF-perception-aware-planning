@@ -3,6 +3,7 @@
   <arg name='kernel_type' default="GPInfo" />
   <node name="$(arg node_name)" pkg="act_map_exp" type="quad_rrt_node" output="screen" args="-alsologtostderr --v=1 --kernel_type=$(arg kernel_type)" clear_params="true">
      <!--act map server parameters-->
+     <param name="kernel_expand_ranges" type="yaml" value="[3.0, 3.0, 2.0]"/>
      <rosparam command="load" file="$(find act_map_ros)/params/act_map_warehouse.yaml"/>
      <param name="gp_vis_dir" value="$(find act_map)/params/fov_approximator_gp/fov45_fs70_lm1000_k15" />
      <param name="preset_occ_layer" value="false" />

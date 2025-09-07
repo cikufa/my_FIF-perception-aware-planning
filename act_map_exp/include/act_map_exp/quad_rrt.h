@@ -81,7 +81,7 @@ public:
 
   void resetPlannerState() override;
 
-private:
+protected:
   bool setPlannerStateCallback(PlanConfig::Request& req,
                                PlanConfig::Response& res) override;
 
@@ -94,9 +94,14 @@ private:
   void visualizeRRTVertsEdges() const;
   void visualizeRRTPath() const;
 
-  void extractRRTPathPoses() const;
+  // void extractRRTPathPoses() const;
+    // NOTE:NOTE:NOTE:
+  inline virtual void  extractRRTPathPoses() const;
+  // virtual void extractRRTPathPoses() const;  // If has implementation
 
-  void setupRRT();
+  // void setupRRT();
+  // NOTE:NOTE:NOTE:
+  inline virtual void setupRRT();
 
   inline bool inRange(const Eigen::Vector3d& pt) const
   {

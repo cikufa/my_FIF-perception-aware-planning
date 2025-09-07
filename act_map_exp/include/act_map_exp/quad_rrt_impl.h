@@ -12,6 +12,7 @@
 
 namespace act_map_exp
 {
+
 template <typename T>
 QuadRRT<T>::QuadRRT(const ros::NodeHandle& nh, const ros::NodeHandle& pnh)
   : PlannerBase<T>(nh, pnh)
@@ -328,6 +329,7 @@ void QuadRRT<T>::clearRRT()
   has_exact_solution_ = false;
 }
 
+// NOTE: not in base
 template <typename T>
 bool QuadRRT<T>::clearRRTPlannerCallback(std_srvs::Empty::Request& /*req*/,
                                          std_srvs::Empty::Response& /*res*/)
@@ -657,7 +659,7 @@ void QuadRRT<T>::setupRRT()
     flat_si_->setStateValidityChecker(
         ob::StateValidityCheckerPtr(new ompl_utils::ESDFChecker(
             flat_si_,
-            std::const_pointer_cast<const voxblox::EsdfServer>(
+            std::const_pointer_cast<const voxblox::EsdfServer>(  //NOTE: this is where esdf map coming from
                 this->esdf_server_)
                 ->getEsdfMapPtr(),
             robot_radius_)));
@@ -732,13 +734,13 @@ void QuadRRT<T>::setupRRT()
       LOG(FATAL) << "Unknown cost type ";
     }
   }
-  pdef_->setOptimizationObjective(total_cost);
+  pdef_->setOptimizationObjective(total_cost); //NOTE:
   total_cost->print(std::cout);
 
   planner_.reset(new ompl::geometric::RRTstar(flat_si_));
   std::dynamic_pointer_cast<ompl::geometric::RRTstar>(planner_)->setRange(
       rrt_range_);
-  planner_->setProblemDefinition(pdef_);
+  planner_->setProblemDefinition(pdef_); //NOTE:
   planner_->setup();
 
   planner_data_.reset(new ob::PlannerData(flat_si_));
