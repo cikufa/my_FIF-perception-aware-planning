@@ -79,7 +79,7 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None):
         if not os.path.exists(pose_e_f_i):
             print(Fore.RED + "  no pose found, plan failed? continue...")
             continue
-        _, _, rot_e_i = _loadPoseError(pose_e_f_i)
+        _, _, rot_e_i= _loadPoseError(pose_e_f_i) #shekoufeh
         n_poses = len(rot_e_i)
         n_failed = sum([1 for v in rot_e_i if math.isnan(v)])
         fail_rate = 1.0 * n_failed / n_poses

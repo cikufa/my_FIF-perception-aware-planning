@@ -172,6 +172,9 @@ void QuadRRT<T>::plan()
       {
         VLOG(1) << "Visualize current results...";
         extractRRTPathPoses();
+        VLOG(1) << "pathhhhhhhhhhhhhhhhhhhhhhhhhhh";
+        VLOG(1) << final_Twb_vec_;
+        // std::cout<<"pathhhhhhhhhhhhhhhhhhhhhhhhhhh"<<final_Twb_vec_;
         visualize();
       }
     }
@@ -223,6 +226,7 @@ void QuadRRT<T>::visualize()
   }
   VLOG(1) << "start visualizaiton...";
   clearMarkerArray(this->traj_orient_pub_);
+  
   visualizeTrajectory(
       final_Twb_vec_, this->traj_pos_pub_, this->traj_orient_pub_, Tbc_,
       Eigen::Vector3d(0.0, 1.0, 0.0), PlannerBase<T>::kWorldFrame);

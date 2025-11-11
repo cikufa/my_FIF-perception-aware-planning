@@ -133,7 +133,7 @@ void saveStampedPoses(const std::vector<double>& times,
   rpg::Aligned<std::vector, rpg::Matrix16> uepose_mat;
   uepose_mat.reserve(poses.size());
   for (size_t i = 0; i < poses.size(); i++)
-  {
+  { 
     rpg::Matrix16 cur_pose;
     const unrealcv_bridge::UEPose& uep = poses[i];
     cur_pose(0, 0) = uep.x;

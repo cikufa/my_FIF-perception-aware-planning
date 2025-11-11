@@ -21,7 +21,6 @@ rc('text', usetex=True)
 def _replaceNan(values, rep):
     return [rep if math.isnan(v) else v for v in values]
 
-
 def _loadPoses(pose_fn):
     times = []
     Twc = []
@@ -47,7 +46,7 @@ def _loadPoseError(err_fn, max_trans_e_m=float('nan'),
             if line.startswith('#'):
                 continue
             elems = line.strip().split(' ')
-            assert len(elems) == 3
+            # assert len(elems) == 3
             names.append(elems[0])
 
             te_i = float(elems[1])
@@ -96,7 +95,7 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None):
             rot_e_i = []
             times_i = []
         else:
-            _, trans_e_i, rot_e_i = _loadPoseError(
+            _, trans_e_i, rot_e_i= _loadPoseError(
                 pose_e_f_i, ana_cfg['max_trans_e_m'], ana_cfg['max_rot_e_deg'])
             times_i, _ = _loadPoses(os.path.join(v, Twc_nm))
 

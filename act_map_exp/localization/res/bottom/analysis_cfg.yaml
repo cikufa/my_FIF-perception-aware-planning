@@ -1,0 +1,10 @@
+max_rot_e_deg: 10.0
+max_trans_e_m: 0.5
+types:
+  bottom_gp_det: gp_det
+  bottom_gp_trace: gp_trace
+  bottom_none: none
+  bottom_pc_det: pc_det
+  bottom_pc_trace: pc_trace
+  bottom_quad_det: quad_det
+  bottom_quad_trace: quad_trace

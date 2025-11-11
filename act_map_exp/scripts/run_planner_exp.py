@@ -25,13 +25,15 @@ def _parseConfig(cfg_fn):
     all_base_fns = []
     all_var_fns = []
 
-    for gk, cfg in all_cfgs.iteritems():
+    # for gk, cfg in all_cfgs.iteritems():
+    for gk, cfg in all_cfgs.items():
         print(Fore.YELLOW + "=====> Group {}".format(gk))
         bases = []
         variations = []
         base_names = []
 
-        for b_i, n_i in cfg['base'].iteritems():
+        # for b_i, n_i in cfg['base'].iteritems():
+        for b_i, n_i in cfg['base'].items():
             bases.append(os.path.join(cfg_dir, b_i))
             base_names.append(n_i)
         for v in sorted(cfg['var']):
@@ -48,7 +50,7 @@ def _parseConfig(cfg_fn):
         all_base_fns.append(bases)
         all_base_names.append(base_names)
         all_var_fns.append(variations)
-
+    print("debugggggggg ll_base_fns", all_base_fns, "all_base_names", all_base_names, "ll_var_fns", all_var_fns)
     return all_base_fns, all_base_names, all_var_fns
 
 
@@ -65,8 +67,8 @@ if __name__ == '__main__':
     parser.add_argument('--base_model', required=True,
                         help='colmap workspace against which to localize')
 
-    parser.add_argument('--unrealcv_ini', required=True,
-                        help='unrealcv configuration (for camera intrinsics)')
+    # parser.add_argument('--unrealcv_ini', required=True,
+    #                     help='unrealcv configuration (for camera intrinsics)')
 
     parser.add_argument('--no_clear_output', action='store_false', dest='clear_output')
 
@@ -81,15 +83,19 @@ if __name__ == '__main__':
 
     parser.add_argument('--exp_nm_rm_sufix', type=str, default='_base')
 
-    parser.set_defaults(clear_output=True, skip_plan=False, skip_render=False, skip_reg=False,
+    # parser.set_defaults(clear_output=True, skip_plan=True, skip_render=False, skip_reg=False,
+    #                     skip_eval=False)
+    parser.set_defaults(clear_output=False, skip_plan=True, skip_render=False, skip_reg=False,
                         skip_eval=False)
     args = parser.parse_args()
 
-    if args.skip_render or args.skip_plan or args.skip_reg:
-        print(Fore.YELLOW + "Not clearing stuff due to skipping steps.")
-        args.clear_output = False
+    # if args.skip_render or args.skip_plan or args.skip_reg:
+    #     print(Fore.YELLOW + "Not clearing stuff due to skipping steps.") 
+    #     args.clear_output = False
 
     assert os.path.exists(args.colmap_script_dir)
+    ren_list_sc = os.path.join(args.colmap_script_dir, 'my_render_ue.py')
+    assert os.path.exists(ren_list_sc)
     gen_list_sc = os.path.join(args.colmap_script_dir, 'generate_img_rel_path.py')
     assert os.path.exists(gen_list_sc)
     reg_sc = os.path.join(args.colmap_script_dir, 'register_images_to_model.py')
@@ -112,9 +118,11 @@ if __name__ == '__main__':
 
             assert os.path.exists(base_f_i)
             exp_nm = base_names[base_idx]
+            # print("exp_nmmmmmmmmmmmmmmmmmm", exp_nm)
             base_outdir_i = os.path.join(args.top_outdir, exp_nm)
-            if not os.path.exists(base_outdir_i):
-                os.makedirs(base_outdir_i)
+            print("base_outdir_iiiiiiiii", base_outdir_i)
+            # if not os.path.exists(base_outdir_i):
+            #     os.makedirs(base_outdir_i)
 
             print(Fore.YELLOW + "Experiment {} from {} with variations: ".format(exp_nm, base_f_i))
             for v in var_fns:
@@ -138,50 +146,63 @@ if __name__ == '__main__':
                 with open(var_f_i) as fvar:
                     var_opts_i = yaml.load(fvar, Loader=yaml.FullLoader)
                 var_nm_i = exp_nm + '_' + var_opts_i['type']
+                # print("var_nm_i", var_nm_i)
                 outdir_i = os.path.abspath(os.path.join(base_outdir_i, var_nm_i))
+                # print("outdir_i", outdir_i)
                 if args.clear_output and os.path.exists(outdir_i):
                     shutil.rmtree(outdir_i)
                     print(Fore.RED + "Removed {}".format(outdir_i))
-                if not os.path.exists(outdir_i):
-                    os.makedirs(outdir_i)
+                # if not os.path.exists(outdir_i):
+                #     os.makedirs(outdir_i)
                 print("- output: {}".format(outdir_i))
                 var_dir_to_types[var_nm_i] = var_opts_i['type']
+#________________________________________________________________________________________________________________
 
-                print(Fore.YELLOW + "Step 1: plan and save")
-                if not args.skip_plan:
-                    cfg_i = os.path.join(outdir_i, var_nm_i+".yaml")
-                    params_i = base_params.copy()
-                    params_i.update(var_opts_i)
-                    params_i['save_traj_abs_dir'] = outdir_i
-                    params_i['save_abs_dir'] = outdir_i
-                    with open(cfg_i, 'w') as f:
-                        yaml.dump(params_i, f, default_flow_style=False)
-                    print("- cfg: {}".format(cfg_i))
-                    set_planner_cmd = ("""rosservice call /{}/set_planner_state"""
-                                       """ "config: '{}'" """.format(var_opts_i['node'], cfg_i))
-                    print(Fore.BLUE + set_planner_cmd)
-                    subprocess.call(shlex.split(set_planner_cmd))
-                    call_planner_cmd = "rosservice call /{}/plan_vis_save".format(var_opts_i['node'])
-                    print(Fore.BLUE + call_planner_cmd)
-                    subprocess.call(shlex.split(call_planner_cmd))
+                # print(Fore.YELLOW + "Step 1: plan and save")
+                # if not args.skip_plan:
+                #     cfg_i = os.path.join(outdir_i, var_nm_i+".yaml")
+                #     params_i = base_params.copy()
+                #     params_i.update(var_opts_i)
+                #     params_i['save_traj_abs_dir'] = outdir_i
+                #     params_i['save_abs_dir'] = outdir_i
+                #     with open(cfg_i, 'w') as f:
+                #         yaml.dump(params_i, f, default_flow_style=False)
+                #     print("- cfg: {}".format(cfg_i))
+                #     set_planner_cmd = ("""rosservice call /{}/set_planner_state"""
+                #                        """ "config: '{}'" """.format(var_opts_i['node'], cfg_i))
+                #     print(Fore.BLUE + set_planner_cmd)
+                #     subprocess.call(shlex.split(set_planner_cmd))
+                #     call_planner_cmd = "rosservice call /{}/plan_vis_save".format(var_opts_i['node'])
+                #     print(Fore.BLUE + call_planner_cmd)
+                #     subprocess.call(shlex.split(call_planner_cmd))
 
-                    reset_planner_cmd = "rosservice call /{}/reset_planner".format(var_opts_i['node'])
-                    print(Fore.BLUE + reset_planner_cmd)
-                    subprocess.call(shlex.split(reset_planner_cmd))
-                else:
-                    print(Fore.BLUE + "> Skip planner")
+                #     reset_planner_cmd = "rosservice call /{}/reset_planner".format(var_opts_i['node'])
+                #     print(Fore.BLUE + reset_planner_cmd)
+                #     subprocess.call(shlex.split(reset_planner_cmd))
+                # else:
+                #     print(Fore.BLUE + "> Skip planner")
+
+               
+                
+#________________________________________________________________________________________________________________
 
                 print(Fore.YELLOW + "Step 2: render from the sampled poses")
                 render_dir_i = os.path.join(outdir_i, 'rendering')
                 if not args.skip_render:
+                    print("ouuuuuuuuuuuuuuuuuuuuuuuuut", outdir_i)
                     ue_pose_fn = os.path.join(outdir_i, 'stamped_Twc_ue.txt')
                     if not os.path.exists(ue_pose_fn):
                         failed_cfgs.append(base_f_i + '-' + var_f_i)
                         print(Fore.RED + "Cannot find UE poses, plan failed? CONTINUE TO NEXT.")
                         continue
-                    render_cmd = ("rosrun unrealcv_bridge render_from_poses.py {} --save_dir {}"
-                                  " --save_sleep_sec 0.1 --unrealcv_in {}").format(
-                                      ue_pose_fn, render_dir_i, args.unrealcv_ini)
+
+                    render_cmd =  "{} {} --save_dir {}".format(
+                        ren_list_sc, ue_pose_fn, render_dir_i)
+                 
+                    # render_cmd = ("rosrun unrealcv_bridge render_from_poses.py {} --save_dir {}"
+                    #               " --save_sleep_sec 0.1 --unrealcv_in {}").format(
+                    #                   ue_pose_fn, render_dir_i, args.unrealcv_ini)
+
                     print(Fore.BLUE + render_cmd)
                     subprocess.call(shlex.split(render_cmd))
                 else:
