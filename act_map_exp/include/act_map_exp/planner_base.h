@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <voxblox_ros/esdf_server.h>
 #include <act_map_ros/act_map_server.h>
 #include <act_map/information_potential.h>
@@ -7,7 +9,12 @@
 #include <pcl_ros/point_cloud.h>
 #include <ros/ros.h>
 
+#include <std_msgs/ColorRGBA.h>
+#include <visualization_msgs/MarkerArray.h>
+
 #include "act_map_exp/PlanConfig.h"
+#include "act_map_exp/VisualizeStampedPoses.h"
+#include "act_map_exp/stamped_pose_viz.h"
 
 namespace act_map_exp
 {
@@ -65,17 +72,22 @@ protected:
 
   bool publishVisualizationCallback(std_srvs::Empty::Request& req,
                                     std_srvs::Empty::Response& res);
+  bool visualizeStampedPosesCallback(
+      VisualizeStampedPoses::Request& req,
+      VisualizeStampedPoses::Response& res);
 
   // common services
   ros::ServiceServer set_planner_state_srv_;
   ros::ServiceServer plan_vis_save_srv_;
   ros::ServiceServer reset_planner_srv_;
   ros::ServiceServer pub_vis_srv_;
+  ros::ServiceServer stamped_pose_viz_srv_;
 
   // basic trajectory and markers
   ros::Publisher traj_orient_pub_;
   ros::Publisher traj_pos_pub_;
   ros::Publisher general_marker_pub_;
+  ros::Publisher stamped_pose_viz_pub_;
 
   // information potential
   act_map::InfoPotentialPtr<T> info_pot_ptr_;
@@ -140,6 +152,12 @@ PlannerBase<T>::PlannerBase(const ros::NodeHandle& nh,
   traj_pos_pub_ = pnh_.advertise<PointCloud>("traj_pos", 50);
   general_marker_pub_ =
       pnh_.advertise<visualization_msgs::Marker>("general_markers", 10);
+  stamped_pose_viz_pub_ =
+      pnh_.advertise<visualization_msgs::MarkerArray>("stamped_pose_viz", 10,
+                                                      true);
+  stamped_pose_viz_srv_ = pnh_.advertiseService(
+      "visualize_stamped_poses", &PlannerBase::visualizeStampedPosesCallback,
+      this);
 
   const bool info_metric_use_log_det =
       rpg_ros::param<bool>(this->pnh_, "info_metric_use_log_det", true);
@@ -216,6 +234,62 @@ bool PlannerBase<T>::planVisSaveCallback(std_srvs::Empty::Request& /*req*/,
   plan();
   visualize();
   saveResults();
+  return true;
+}
+
+template <typename T>
+bool PlannerBase<T>::visualizeStampedPosesCallback(
+    VisualizeStampedPoses::Request& req,
+    VisualizeStampedPoses::Response& res)
+{
+  res.success = false;
+  if (req.file_path.empty())
+  {
+    res.message = "file_path empty";
+    return true;
+  }
+
+  rpg::PoseVec poses;
+  std::vector<Eigen::Vector3d> view_dirs;
+  std::string parse_error;
+  if (!loadStampedUePoses(req.file_path, &poses, &view_dirs, &parse_error))
+  {
+    res.message = parse_error.empty()
+                      ? "failed to parse " + req.file_path
+                      : parse_error;
+    return true;
+  }
+
+  const std::string label = req.label.empty() ? "stamped_pose" : req.label;
+  const std::string frame =
+      req.frame.empty() ? PlannerBase<T>::kWorldFrame : req.frame;
+
+  std_msgs::ColorRGBA color;
+  if (req.a > 0.0f)
+  {
+    color.r = req.r;
+    color.g = req.g;
+    color.b = req.b;
+    color.a = req.a;
+  }
+  else
+  {
+    color.r = 0.0f;
+    color.g = 0.6f;
+    color.b = 1.0f;
+    color.a = 1.0f;
+  }
+
+  visualization_msgs::MarkerArray markers;
+  const double arrow_length = computeStampedArrowLength(poses);
+  markers.markers.push_back(createStampedPathMarker(
+      poses, frame, color, label + "_path", 0));
+  markers.markers.push_back(createStampedViewMarker(
+      poses, view_dirs, frame, color, label + "_view", 1, arrow_length));
+
+  stamped_pose_viz_pub_.publish(markers);
+  res.success = true;
+  res.message = "Published " + label + " (" + req.file_path + ")";
   return true;
 }
 

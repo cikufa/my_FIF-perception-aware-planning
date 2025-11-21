@@ -19,6 +19,7 @@ set(HEADERS
   include/act_map_exp/numdiff-jacobian-tester.h
   include/act_map_exp/potential_cost.h
   include/act_map_exp/viz_utils.h
+  include/act_map_exp/stamped_pose_viz.h
   include/act_map_exp/poly_traj_helper.h
   include/act_map_exp/ompl_utils.h
   )
@@ -30,6 +31,7 @@ set(SOURCES
   src/exp_utils.cpp
   src/potential_cost.cpp
   src/viz_utils.cpp
+  src/stamped_pose_viz.cpp
   src/poly_traj_helper.cpp
   )
 
