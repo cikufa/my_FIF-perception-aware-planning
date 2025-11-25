@@ -9,9 +9,85 @@
 #include "act_map_exp/ompl_utils.h"
 #include "act_map_exp/exp_utils.h"
 #include "act_map_exp/viz_utils.h"
+#include <fstream>
+#include <sstream>
 
 namespace act_map_exp
 {
+namespace
+{
+inline bool loadStampedTwc(const std::string& file_path,
+                           rpg::PoseVec* poses,
+                           std::string* error_msg = nullptr)
+{
+  if (!poses)
+  {
+    if (error_msg)
+    {
+      *error_msg = "pose output is null";
+    }
+    return false;
+  }
+
+  std::ifstream stream(file_path);
+  if (!stream.is_open())
+  {
+    if (error_msg)
+    {
+      *error_msg = "failed to open " + file_path;
+    }
+    return false;
+  }
+
+  poses->clear();
+  std::string line;
+  while (std::getline(stream, line))
+  {
+    const std::size_t comment_pos = line.find('#');
+    if (comment_pos != std::string::npos)
+    {
+      line = line.substr(0, comment_pos);
+    }
+
+    std::istringstream iss(line);
+    double time = 0.0;
+    if (!(iss >> time))
+    {
+      continue;
+    }
+
+    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+    bool complete = true;
+    for (int i = 0; i < 16; i++)
+    {
+      double v = 0.0;
+      if (!(iss >> v))
+      {
+        complete = false;
+        break;
+      }
+      T(i / 4, i % 4) = v;
+    }
+    if (!complete)
+    {
+      continue;
+    }
+    poses->emplace_back(rpg::Pose(T));
+  }
+
+  if (poses->empty())
+  {
+    if (error_msg)
+    {
+      *error_msg = "no poses read from " + file_path;
+    }
+    return false;
+  }
+
+  return true;
+}
+}  // namespace
+
 template <typename T>
 QuadRRT<T>::QuadRRT(const ros::NodeHandle& nh, const ros::NodeHandle& pnh)
   : PlannerBase<T>(nh, pnh)
@@ -56,6 +132,8 @@ QuadRRT<T>::QuadRRT(const ros::NodeHandle& nh, const ros::NodeHandle& pnh)
   rrt_vert_pub_ = this->pnh_.template advertise<PointCloud>("rrt_vert", 50);
   rrt_edge_pub_ =
       this->pnh_.template advertise<visualization_msgs::Marker>("rrt_edge", 50);
+  visualize_saved_rrt_srv_ = this->pnh_.advertiseService(
+      "visualize_saved_rrt", &QuadRRT::visualizeSavedRRTCallback, this);
 
   std::cout << "===========================\n";
   std::cout << "=== Initialization Done ===\n";
@@ -172,8 +250,8 @@ void QuadRRT<T>::plan()
       {
         VLOG(1) << "Visualize current results...";
         extractRRTPathPoses();
-        VLOG(1) << "pathhhhhhhhhhhhhhhhhhhhhhhhhhh";
-        VLOG(1) << final_Twb_vec_;
+        VLOG(1) << "pathhhhhhhhhhhhhhhhhhhhhhhhhhh size "
+                << final_Twb_vec_.size();
         // std::cout<<"pathhhhhhhhhhhhhhhhhhhhhhhhhhh"<<final_Twb_vec_;
         visualize();
       }
@@ -337,6 +415,59 @@ bool QuadRRT<T>::clearRRTPlannerCallback(std_srvs::Empty::Request& /*req*/,
                                          std_srvs::Empty::Response& /*res*/)
 {
   clearRRT();
+  return true;
+}
+
+template <typename T>
+bool QuadRRT<T>::visualizeSavedRRTCallback(
+    VisualizeStampedPoses::Request& req, VisualizeStampedPoses::Response& res)
+{
+  res.success = false;
+  if (req.file_path.empty())
+  {
+    res.message = "file_path empty";
+    return true;
+  }
+
+  rpg::PoseVec Twc_vec;
+  std::string parse_error;
+  if (!loadStampedTwc(req.file_path, &Twc_vec, &parse_error))
+  {
+    res.message = parse_error.empty()
+                      ? "failed to parse " + req.file_path
+                      : parse_error;
+    return true;
+  }
+
+  const rpg::Pose Tcb = Tbc_.inverse();
+  rpg::PoseVec Twb_vec;
+  Twb_vec.reserve(Twc_vec.size());
+  for (const rpg::Pose& Twc : Twc_vec)
+  {
+    Twb_vec.emplace_back(Twc * Tcb);
+  }
+
+  const std::string frame =
+      req.frame.empty() ? PlannerBase<T>::kWorldFrame : req.frame;
+  Eigen::Vector3d rgb(0.0, 1.0, 0.0);
+  if (req.a > 0.0f)
+  {
+    rgb(0) = req.r;
+    rgb(1) = req.g;
+    rgb(2) = req.b;
+  }
+
+  clearMarkerArray(this->traj_orient_pub_);
+  visualizeTrajectory(Twb_vec, this->traj_pos_pub_, this->traj_orient_pub_,
+                      Tbc_, rgb, frame);
+  visualizePath(Twb_vec, red_, green_, this->general_marker_pub_, 0, frame,
+                req.label.empty() ? "saved_rrt_path" : req.label);
+
+  final_Twb_vec_ = Twb_vec;
+  has_valid_solution_ = true;
+  has_exact_solution_ = false;
+  res.success = true;
+  res.message = "published saved trajectory from " + req.file_path;
   return true;
 }
 

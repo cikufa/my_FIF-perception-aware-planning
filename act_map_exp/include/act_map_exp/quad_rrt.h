@@ -88,6 +88,8 @@ private:
   void clearRRT();
   bool clearRRTPlannerCallback(std_srvs::Empty::Request& req,
                                std_srvs::Empty::Response& res);
+  bool visualizeSavedRRTCallback(VisualizeStampedPoses::Request& req,
+                                 VisualizeStampedPoses::Response& res);
 
   void loadFromYaml(const std::string& param_fn);
 
@@ -114,6 +116,7 @@ private:
 
   // service
   ros::ServiceServer clear_rrt_planner_srv_;
+  ros::ServiceServer visualize_saved_rrt_srv_;
 
   // general configurations
   double robot_radius_;
