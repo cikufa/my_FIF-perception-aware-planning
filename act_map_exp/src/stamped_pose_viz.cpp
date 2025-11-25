@@ -101,7 +101,7 @@ bool loadStampedUePoses(const std::string& file_path,
 
     poses->emplace_back(Twc);
 
-    Eigen::Vector3d view_dir = -Twc.getRotation().toRotationMatrix().col(2);
+    Eigen::Vector3d view_dir = -Twc.getRotation().getRotationMatrix().col(2);
     const double norm = view_dir.norm();
     if (norm > 1e-9)
     {

@@ -5,17 +5,62 @@
 #include <rpg_common/fs.h>
 #include <rpg_common_ros/params_helper.h>
 
+#include <fstream>
+#include <sstream>
+
 #include <ompl/geometric/planners/rrt/RRTstar.h>
 #include "act_map_exp/ompl_utils.h"
 #include "act_map_exp/exp_utils.h"
 #include "act_map_exp/viz_utils.h"
-#include <fstream>
-#include <sstream>
+#include <cmath>
 
 namespace act_map_exp
 {
 namespace
 {
+inline std_msgs::ColorRGBA makeColor(const double r,
+                                     const double g,
+                                     const double b,
+                                     const double a = 1.0)
+{
+  std_msgs::ColorRGBA c;
+  c.r = static_cast<float>(r);
+  c.g = static_cast<float>(g);
+  c.b = static_cast<float>(b);
+  c.a = static_cast<float>(a);
+  return c;
+}
+
+inline void sampleIndices(const std::size_t max_samples,
+                          const std::size_t total,
+                          std::vector<std::size_t>* out)
+{
+  CHECK(out);
+  out->clear();
+  if (total == 0 || max_samples == 0)
+  {
+    return;
+  }
+  if (total <= max_samples)
+  {
+    out->reserve(total);
+    for (std::size_t i = 0; i < total; ++i)
+    {
+      out->push_back(i);
+    }
+    return;
+  }
+
+  const double step = static_cast<double>(total - 1) /
+                      static_cast<double>(max_samples - 1);
+  out->reserve(max_samples);
+  for (std::size_t i = 0; i < max_samples; ++i)
+  {
+    const std::size_t idx = static_cast<std::size_t>(std::round(i * step));
+    out->push_back(std::min(idx, total - 1));
+  }
+}
+
 inline bool loadStampedTwc(const std::string& file_path,
                            rpg::PoseVec* poses,
                            std::string* error_msg = nullptr)
@@ -85,6 +130,123 @@ inline bool loadStampedTwc(const std::string& file_path,
   }
 
   return true;
+}
+
+inline double pathLength(const rpg::PoseVec& poses)
+{
+  double len = 0.0;
+  for (std::size_t i = 1; i < poses.size(); ++i)
+  {
+    len += (poses[i].getPosition() - poses[i - 1].getPosition()).norm();
+  }
+  return len;
+}
+
+inline void publishTrajectoryPoints(const rpg::PoseVec& Twc_vec,
+                                    const ros::Publisher& pub,
+                                    const Eigen::Vector3d& rgb,
+                                    const std::string& frame)
+{
+  if (pub.getNumSubscribers() == 0)
+  {
+    return;
+  }
+  PointCloud traj_pos_pc;
+  pcl_conversions::toPCL(ros::Time::now(), traj_pos_pc.header.stamp);
+  traj_pos_pc.header.frame_id = frame;
+  traj_pos_pc.reserve(Twc_vec.size());
+  for (const rpg::Pose& Twc : Twc_vec)
+  {
+    Point pt;
+    pt.x = static_cast<float>(Twc.getPosition().x());
+    pt.y = static_cast<float>(Twc.getPosition().y());
+    pt.z = static_cast<float>(Twc.getPosition().z());
+    pt.r = static_cast<uint8_t>(rgb(0) * 255);
+    pt.g = static_cast<uint8_t>(rgb(1) * 255);
+    pt.b = static_cast<uint8_t>(rgb(2) * 255);
+    traj_pos_pc.push_back(pt);
+  }
+  pub.publish(traj_pos_pc);
+}
+
+inline void publishTrajectoryOrient(const rpg::PoseVec& Twc_vec,
+                                    const ros::Publisher& pub,
+                                    const Eigen::Vector3d& rgb,
+                                    const std::string& frame,
+                                    const std::string& ns,
+                                    const int base_id)
+{
+  if (pub.getNumSubscribers() == 0 || Twc_vec.empty())
+  {
+    return;
+  }
+
+  constexpr std::size_t kMaxMarkers = 10u;
+  std::vector<std::size_t> idx;
+  sampleIndices(kMaxMarkers, Twc_vec.size(), &idx);
+  const double base_len =
+      std::max(0.1, pathLength(Twc_vec) /
+                        static_cast<double>(std::max<std::size_t>(idx.size(), 1)));
+
+  visualization_msgs::MarkerArray ma;
+  int id = base_id;
+  for (const std::size_t i : idx)
+  {
+    const rpg::Pose& Twc = Twc_vec[i];
+    visualization_msgs::Marker m;
+    m.header.frame_id = frame;
+    m.header.stamp = ros::Time::now();
+    m.ns = ns;
+    m.id = id++;
+    m.type = visualization_msgs::Marker::ARROW;
+    m.action = visualization_msgs::Marker::ADD;
+    m.pose.position.x = Twc.getPosition().x();
+    m.pose.position.y = Twc.getPosition().y();
+    m.pose.position.z = Twc.getPosition().z();
+    m.pose.orientation.w = Twc.getRotation().w();
+    m.pose.orientation.x = Twc.getRotation().x();
+    m.pose.orientation.y = Twc.getRotation().y();
+    m.pose.orientation.z = Twc.getRotation().z();
+    m.scale.x = base_len;
+    m.scale.y = base_len * 0.15;
+    m.scale.z = base_len * 0.15;
+    m.color = makeColor(rgb(0), rgb(1), rgb(2), 0.9);
+    ma.markers.push_back(m);
+  }
+  pub.publish(ma);
+}
+
+inline void publishPathLineStrip(const rpg::PoseVec& poses,
+                                 const Eigen::Vector3d& rgb,
+                                 const ros::Publisher& pub,
+                                 const int id,
+                                 const std::string& frame,
+                                 const std::string& ns)
+{
+  if (pub.getNumSubscribers() == 0 || poses.empty())
+  {
+    return;
+  }
+  visualization_msgs::Marker m;
+  m.ns = ns;
+  m.id = id;
+  m.header.frame_id = frame;
+  m.header.stamp = ros::Time::now();
+  m.pose.orientation.w = 1.0;
+  m.action = visualization_msgs::Marker::ADD;
+  m.type = visualization_msgs::Marker::LINE_STRIP;
+  m.scale.x = std::max(0.01, pathLength(poses) * 0.01);
+  const std_msgs::ColorRGBA c = makeColor(rgb(0), rgb(1), rgb(2), 1.0);
+  for (const rpg::Pose& p : poses)
+  {
+    geometry_msgs::Point pt;
+    pt.x = p.getPosition().x();
+    pt.y = p.getPosition().y();
+    pt.z = p.getPosition().z();
+    m.points.push_back(pt);
+    m.colors.push_back(c);
+  }
+  pub.publish(m);
 }
 }  // namespace
 
@@ -418,6 +580,80 @@ bool QuadRRT<T>::clearRRTPlannerCallback(std_srvs::Empty::Request& /*req*/,
   return true;
 }
 
+namespace
+{
+inline bool loadStampedTwc(const std::string& file_path,
+                           rpg::PoseVec* poses,
+                           std::string* error_msg = nullptr)
+{
+  if (!poses)
+  {
+    if (error_msg)
+    {
+      *error_msg = "pose output is null";
+    }
+    return false;
+  }
+
+  std::ifstream stream(file_path);
+  if (!stream.is_open())
+  {
+    if (error_msg)
+    {
+      *error_msg = "failed to open " + file_path;
+    }
+    return false;
+  }
+
+  poses->clear();
+  std::string line;
+  while (std::getline(stream, line))
+  {
+    const std::size_t comment_pos = line.find('#');
+    if (comment_pos != std::string::npos)
+    {
+      line = line.substr(0, comment_pos);
+    }
+
+    std::istringstream iss(line);
+    double time = 0.0;
+    if (!(iss >> time))
+    {
+      continue;
+    }
+
+    Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+    bool complete = true;
+    for (int i = 0; i < 16; i++)
+    {
+      double v = 0.0;
+      if (!(iss >> v))
+      {
+        complete = false;
+        break;
+      }
+      T(i / 4, i % 4) = v;
+    }
+    if (!complete)
+    {
+      continue;
+    }
+    poses->emplace_back(rpg::Pose(T));
+  }
+
+  if (poses->empty())
+  {
+    if (error_msg)
+    {
+      *error_msg = "no poses read from " + file_path;
+    }
+    return false;
+  }
+
+  return true;
+}
+}  // namespace
+
 template <typename T>
 bool QuadRRT<T>::visualizeSavedRRTCallback(
     VisualizeStampedPoses::Request& req, VisualizeStampedPoses::Response& res)
@@ -429,45 +665,79 @@ bool QuadRRT<T>::visualizeSavedRRTCallback(
     return true;
   }
 
-  rpg::PoseVec Twc_vec;
-  std::string parse_error;
-  if (!loadStampedTwc(req.file_path, &Twc_vec, &parse_error))
+  // Support one or two comma-separated paths.
+  std::vector<std::string> files;
   {
-    res.message = parse_error.empty()
-                      ? "failed to parse " + req.file_path
-                      : parse_error;
+    std::stringstream ss(req.file_path);
+    std::string item;
+    while (std::getline(ss, item, ','))
+    {
+      if (!item.empty())
+      {
+        files.push_back(item);
+      }
+    }
+  }
+  if (files.empty())
+  {
+    res.message = "no valid file paths";
+    return true;
+  }
+  if (files.size() > 2)
+  {
+    res.message = "please provide at most two comma-separated paths";
     return true;
   }
 
-  const rpg::Pose Tcb = Tbc_.inverse();
-  rpg::PoseVec Twb_vec;
-  Twb_vec.reserve(Twc_vec.size());
-  for (const rpg::Pose& Twc : Twc_vec)
+  std::vector<rpg::PoseVec> all_paths;
+  for (const std::string& f : files)
   {
-    Twb_vec.emplace_back(Twc * Tcb);
+    rpg::PoseVec Twc_vec;
+    std::string parse_error;
+    if (!loadStampedTwc(f, &Twc_vec, &parse_error))
+    {
+      res.message = parse_error.empty() ? ("failed to parse " + f)
+                                        : parse_error;
+      return true;
+    }
+    all_paths.push_back(std::move(Twc_vec));
   }
 
   const std::string frame =
       req.frame.empty() ? PlannerBase<T>::kWorldFrame : req.frame;
-  Eigen::Vector3d rgb(0.0, 1.0, 0.0);
+  const std::string base_label =
+      req.label.empty() ? "saved_rrt_path" : req.label;
+
+  Eigen::Vector3d color_a(0.0, 1.0, 0.0);
   if (req.a > 0.0f)
   {
-    rgb(0) = req.r;
-    rgb(1) = req.g;
-    rgb(2) = req.b;
+    color_a(0) = req.r;
+    color_a(1) = req.g;
+    color_a(2) = req.b;
   }
+  Eigen::Vector3d color_b(1.0, 0.5, 0.0);
 
   clearMarkerArray(this->traj_orient_pub_);
-  visualizeTrajectory(Twb_vec, this->traj_pos_pub_, this->traj_orient_pub_,
-                      Tbc_, rgb, frame);
-  visualizePath(Twb_vec, red_, green_, this->general_marker_pub_, 0, frame,
-                req.label.empty() ? "saved_rrt_path" : req.label);
+  clearMarker(this->general_marker_pub_);
 
-  final_Twb_vec_ = Twb_vec;
-  has_valid_solution_ = true;
-  has_exact_solution_ = false;
+  int id_base = 0;
+  for (std::size_t i = 0; i < all_paths.size(); ++i)
+  {
+    const rpg::PoseVec& Twc_vec = all_paths[i];
+    const Eigen::Vector3d& rgb = (i == 0) ? color_a : color_b;
+    const std::string ns = base_label + "_" + std::to_string(i);
+
+    publishTrajectoryPoints(Twc_vec, this->traj_pos_pub_, rgb, frame);
+    publishTrajectoryOrient(Twc_vec, this->traj_orient_pub_, rgb, frame, ns,
+                            id_base);
+    publishPathLineStrip(Twc_vec, rgb, this->general_marker_pub_, id_base,
+                         frame, ns);
+    id_base += 1000;
+  }
+
   res.success = true;
-  res.message = "published saved trajectory from " + req.file_path;
+  res.message = "published " + std::to_string(all_paths.size()) +
+                " saved trajectory(ies) from " + req.file_path;
   return true;
 }
 

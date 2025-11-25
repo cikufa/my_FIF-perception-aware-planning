@@ -48,9 +48,6 @@ target_link_libraries(quad_traj_opt_node ${PROJECT_NAME})
 cs_add_executable(quad_rrt_node src/quad_rrt_node.cpp)
 target_link_libraries(quad_rrt_node ${PROJECT_NAME})
 
-cs_add_executable(visualize_saved_rrt_node src/visualize_saved_rrt.cpp)
-target_link_libraries(visualize_saved_rrt_node ${PROJECT_NAME})
-
 # tests
 catkin_add_gtest(test_exp_utils tests/test_exp_utils.cpp)
 target_link_libraries(test_exp_utils ${PROJECT_NAME})

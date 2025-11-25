@@ -231,9 +231,9 @@ def main() -> None:
 
     if not args.before and not args.after:
         parser.error("At least one of --before or --after must be specified.")
-
+    print("test 234")
     rospy.init_node("stamped_pose_visualizer", anonymous=True)
-
+    print("test 236")
     datasets = []
     if args.before:
         poses_before = load_poses(args.before)
