@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
 import os
 import shutil
@@ -9,6 +9,8 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rc
+
+from wandb_utils import add_wandb_args, safe_init, log_images, log_metrics, finish
 
 init(autoreset=True)
 
@@ -29,7 +31,7 @@ def _loadCostHistory(fn):
     return data[:, 1].tolist()
 
 
-def _analyzeSingleCfg(cfg_dir, base_cfg=None):
+def _analyzeSingleCfg(cfg_dir, base_cfg=None, wandb_mod=None, wandb_prefix=""):
     print(Fore.RED + "==== process configuration {} ====".format(cfg_dir))
     analysis_cfg_fn = os.path.join(cfg_dir, 'analysis_cfg.yaml')
     assert os.path.exists(analysis_cfg_fn), analysis_cfg_fn
@@ -80,6 +82,17 @@ def _analyzeSingleCfg(cfg_dir, base_cfg=None):
             # ceres_time.append(
             #     ceres_summary['custom_solve_time'] - ceres_summary['custom_logger_time'])
 
+    if wandb_mod is not None:
+        prefix = wandb_prefix.rstrip('/')
+        if prefix:
+            prefix = prefix + '/'
+        metrics = {}
+        for type_key, solve_time in ceres_time.items():
+            metrics["{}solve_time/{}".format(prefix, type_key)] = solve_time
+        for type_key, n_iter in ceres_iter.items():
+            metrics["{}solve_iter/{}".format(prefix, type_key)] = n_iter
+        log_metrics(wandb_mod, metrics)
+
     return total_cost_hist, info_cost_hist, ceres_time, ceres_iter
 
 
@@ -94,6 +107,7 @@ if __name__ == '__main__':
     parser.add_argument('--no_legend', action='store_false', dest='legend')
     parser.add_argument('--outdir', type=str, default=None)
     parser.add_argument('--plt_max_iter', type=int, default=-1)
+    add_wandb_args(parser)
     parser.set_defaults(multiple=False, legend=True)
     args = parser.parse_args()
 
@@ -105,6 +119,13 @@ if __name__ == '__main__':
     with open(args.base_ana_cfg) as f:
         base_ana_cfg = yaml.load(f, Loader=yaml.FullLoader)
     print("Base configuration for analysis is {}".format(base_ana_cfg))
+
+    run_name = os.path.basename(os.path.abspath(args.top_dir))
+    run, wandb_mod = safe_init(
+        args,
+        config={'top_dir': args.top_dir, 'base_ana_cfg': args.base_ana_cfg,
+                'multiple': args.multiple, 'outdir': outdir},
+        run_name=run_name)
 
     all_total_cost_history = []
     all_info_cost_history = []
@@ -118,8 +139,9 @@ if __name__ == '__main__':
         for v in cfg_nms:
             print(Fore.GREEN + "- {}".format(v))
         for cfg_d_i in cfg_dirs:
+            cfg_key = os.path.basename(cfg_d_i.rstrip(os.sep))
             total_cost_i, info_cost_i, ceres_time_i, ceres_iter_i = _analyzeSingleCfg(
-                cfg_d_i, base_ana_cfg)
+                cfg_d_i, base_ana_cfg, wandb_mod=wandb_mod, wandb_prefix=cfg_key)
             all_total_cost_history.append(total_cost_i)
             all_info_cost_history.append(info_cost_i)
             all_ceres_solve_time.append(ceres_time_i)
@@ -184,6 +206,14 @@ if __name__ == '__main__':
                                               average_ceres_iters[type_i]))
             f.write('\n')
 
+        if wandb_mod is not None:
+            metrics = {}
+            for type_i, avg_time in average_ceres_time.items():
+                metrics["avg_solve_time/{}".format(type_i)] = avg_time
+            for type_i, avg_iter in average_ceres_iters.items():
+                metrics["avg_solve_iter/{}".format(type_i)] = avg_iter
+            log_metrics(wandb_mod, metrics)
+
         print(Fore.GREEN + '- Plot cost vs. iterations')
         for plot_nm in sorted(base_ana_cfg['iter_cost_plot'].keys()):
             entries = base_ana_cfg['iter_cost_plot'][plot_nm]
@@ -214,5 +244,9 @@ if __name__ == '__main__':
                 plt.legend()
                 fig.tight_layout()
                 fig.savefig(fig_fn, bbox_inches='tight', dpi=300)
+                if wandb_mod is not None:
+                    log_images(wandb_mod, {'iter_vs_cost/{}/{}'.format(plot_nm, cfg_nm): fig_fn})
     else:
-        _analyzeSingleCfg(args.top_dir, base_ana_cfg)
+        _analyzeSingleCfg(args.top_dir, base_ana_cfg, wandb_mod=wandb_mod)
+
+    finish(run)
