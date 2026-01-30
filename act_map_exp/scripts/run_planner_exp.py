@@ -5,11 +5,39 @@ import argparse
 import shutil
 import shlex
 import subprocess
+import sys
 from colorama import init, Fore
 
 import yaml
 
 init(autoreset=True)
+
+VERBOSE = False
+PROGRESS = False
+
+
+def log(msg):
+    if VERBOSE:
+        print(msg)
+
+
+def progress_bar(current, total, suffix=""):
+    if not PROGRESS:
+        return
+    width = 30
+    if total <= 0:
+        total = 1
+    filled = int(width * float(current) / float(total))
+    bar = "#" * filled + "-" * (width - filled)
+    sys.stdout.write("\r[{}] {}/{} {}".format(bar, current, total, suffix))
+    sys.stdout.flush()
+
+
+def progress_done():
+    if not PROGRESS:
+        return
+    sys.stdout.write("\n")
+    sys.stdout.flush()
 
 
 def _parseConfig(cfg_fn):
@@ -19,7 +47,7 @@ def _parseConfig(cfg_fn):
 
     with open(cfg_fn, 'r') as f:
         all_cfgs = yaml.load(f, Loader=yaml.FullLoader)
-    print(all_cfgs)
+    log(all_cfgs)
 
     all_base_names = []
     all_base_fns = []
@@ -27,7 +55,7 @@ def _parseConfig(cfg_fn):
 
     # for gk, cfg in all_cfgs.iteritems():
     for gk, cfg in all_cfgs.items():
-        print(Fore.YELLOW + "=====> Group {}".format(gk))
+        log(Fore.YELLOW + "=====> Group {}".format(gk))
         bases = []
         variations = []
         base_names = []
@@ -39,18 +67,19 @@ def _parseConfig(cfg_fn):
         for v in sorted(cfg['var']):
             variations.append(os.path.join(cfg_dir, v))
 
-        print(Fore.YELLOW + "From configuraiton file {}:".format(cfg_fn))
-        print(Fore.YELLOW + "- found {} bases".format(len(bases)))
+        log(Fore.YELLOW + "From configuraiton file {}:".format(cfg_fn))
+        log(Fore.YELLOW + "- found {} bases".format(len(bases)))
         for base_idx, v in enumerate(bases):
-            print("  - {}: {}".format(v, base_names[base_idx]))
+            log("  - {}: {}".format(v, base_names[base_idx]))
 
-        print(Fore.YELLOW + "- found {} variations".format(len(variations)))
+        log(Fore.YELLOW + "- found {} variations".format(len(variations)))
         for v in variations:
-            print("  - {}".format(v))
+            log("  - {}".format(v))
         all_base_fns.append(bases)
         all_base_names.append(base_names)
         all_var_fns.append(variations)
-    print("debugggggggg ll_base_fns", all_base_fns, "all_base_names", all_base_names, "ll_var_fns", all_var_fns)
+    log("debugggggggg ll_base_fns {} all_base_names {} ll_var_fns {}".format(
+        all_base_fns, all_base_names, all_var_fns))
     return all_base_fns, all_base_names, all_var_fns
 
 
@@ -131,12 +160,20 @@ if __name__ == '__main__':
     parser.add_argument('--exp_nm_rm_sufix', type=str, default='_base')
     parser.add_argument('--along_path', action='store_true',
                         help='use stamped_Twc_ue_path_yaw and path_yaw output names')
+    parser.add_argument('--verbose', action='store_true',
+                        help='enable verbose logging')
+    parser.add_argument('--no_progress', action='store_true',
+                        help='disable progress bar')
+    parser.add_argument('--progress', action='store_true',
+                        help='enable progress bar')
 
     # parser.set_defaults(clear_output=True, skip_plan=True, skip_render=False, skip_reg=False,
     #                     skip_eval=False)
     parser.set_defaults(clear_output=False, skip_plan=True, skip_render=False, skip_reg=False,
                         skip_eval=False)
     args = parser.parse_args()
+    VERBOSE = bool(args.verbose)
+    PROGRESS = bool(args.progress)
     if args.defaults_yaml:
         if not os.path.exists(args.defaults_yaml):
             parser.error("defaults_yaml does not exist: {}".format(args.defaults_yaml))
@@ -203,35 +240,35 @@ if __name__ == '__main__':
         return None
 
     for base_fns, base_names, var_fns in zip(all_base_fns, all_base_names, all_var_fns):
-        print(Fore.YELLOW + "Processing group: base {} with var. {}".format(base_fns, var_fns))
+        log(Fore.YELLOW + "Processing group: base {} with var. {}".format(base_fns, var_fns))
         failed_cfgs = []
         for base_idx, base_f_i in enumerate(base_fns):
-            print(Fore.RED + "==============================")
-            print(Fore.RED + "===== Running base {}... =====".format(base_f_i))
-            print(Fore.RED + "==============================")
+            log(Fore.RED + "==============================")
+            log(Fore.RED + "===== Running base {}... =====".format(base_f_i))
+            log(Fore.RED + "==============================")
 
             assert os.path.exists(base_f_i)
             exp_nm = base_names[base_idx]
             # print("exp_nmmmmmmmmmmmmmmmmmm", exp_nm)
             base_outdir_i = os.path.join(args.top_outdir, exp_nm)
-            print("base_outdir_iiiiiiiii", base_outdir_i)
+            log("base_outdir_iiiiiiiii {}".format(base_outdir_i))
             # if not os.path.exists(base_outdir_i):
             #     os.makedirs(base_outdir_i)
 
-            print(Fore.YELLOW + "Experiment {} from {} with variations: ".format(exp_nm, base_f_i))
+            log(Fore.YELLOW + "Experiment {} from {} with variations: ".format(exp_nm, base_f_i))
             for v in var_fns:
-                print("- {}".format(v))
-            print("Results will be saved in {}".format(base_outdir_i))
+                log("- {}".format(v))
+            log("Results will be saved in {}".format(base_outdir_i))
 
             with open(base_f_i, 'r') as f:
                 base_params = yaml.load(f, Loader=yaml.FullLoader)
             ana_cfg_fn = os.path.join(base_outdir_i, 'analysis_cfg.yaml')
             if os.path.exists(ana_cfg_fn):
-                print(Fore.YELLOW + "Found prev. analysis_cfg.yaml, wil update it")
+                log(Fore.YELLOW + "Found prev. analysis_cfg.yaml, wil update it")
                 with open(ana_cfg_fn, 'r') as f:
                     prev_ana_cfg = yaml.load(f, Loader=yaml.FullLoader)
                     var_dir_to_types = prev_ana_cfg['types']
-                    print("- loaded types {}".format(var_dir_to_types))
+                    log("- loaded types {}".format(var_dir_to_types))
             else:
                 var_dir_to_types = {}
             # Build variation list depending on mode
@@ -250,7 +287,7 @@ if __name__ == '__main__':
                     })
                     added = True
                 else:
-                    print(Fore.RED + "Optimized directory does not exist: {}".format(abs_opt_dir))
+                    log(Fore.RED + "Optimized directory does not exist: {}".format(abs_opt_dir))
                     failed_cfgs.append(base_f_i + '-optimized-missing')
 
                 if args.along_path:
@@ -265,7 +302,7 @@ if __name__ == '__main__':
                         })
                         added = True
                     else:
-                        print(Fore.RED + "Optimized path-yaw directory does not exist: {}".format(
+                        log(Fore.RED + "Optimized path-yaw directory does not exist: {}".format(
                             abs_opt_path_yaw))
                         failed_cfgs.append(base_f_i + '-optimized-path-yaw-missing')
 
@@ -274,7 +311,7 @@ if __name__ == '__main__':
             if opt_only:
                 opt_dir = _resolve_opt_dir(exp_nm, base_idx, base_names)
                 if opt_dir is None:
-                    print(Fore.RED + "No optimized directory specified for base {}.".format(exp_nm))
+                    log(Fore.RED + "No optimized directory specified for base {}.".format(exp_nm))
                     failed_cfgs.append(base_f_i + '-optimized-missing')
                     continue
                 if not _append_opt_entries(opt_dir):
@@ -291,9 +328,10 @@ if __name__ == '__main__':
                     if opt_dir is not None:
                         _append_opt_entries(opt_dir)
 
-            for var_entry in var_entries:
+            base_total = len(var_entries)
+            for var_idx, var_entry in enumerate(var_entries, start=1):
                 if var_entry.get('cfg_fn') is None:
-                    print(Fore.RED + "===== Running optimized folder {}... =====".format(var_entry['outdir']))
+                    log(Fore.RED + "===== Running optimized folder {}... =====".format(var_entry['outdir']))
                     if var_entry['name'] == 'optimized':
                         var_nm_i = exp_nm + '_optimized'
                     else:
@@ -305,11 +343,11 @@ if __name__ == '__main__':
                     fail_label = base_f_i + '-optimized'
                 else:
                     var_f_i = var_entry['cfg_fn']
-                    print(Fore.RED + "===== Running variation {}... =====".format(var_f_i))
+                    log(Fore.RED + "===== Running variation {}... =====".format(var_f_i))
                     with open(var_f_i) as fvar:
                         var_opts_i = yaml.load(fvar, Loader=yaml.FullLoader)
                     if args.only_optimized and var_opts_i.get('type') != 'optimized':
-                        print(Fore.BLUE + "> Skip variation (only_optimized set).")
+                        log(Fore.BLUE + "> Skip variation (only_optimized set).")
                         continue
                     var_nm_i = exp_nm + '_' + var_opts_i['type']
                     outdir_i = os.path.abspath(os.path.join(base_outdir_i, var_nm_i))
@@ -318,12 +356,13 @@ if __name__ == '__main__':
                     entry_path_yaw = var_entry.get('path_yaw', False)
                     if args.clear_output and os.path.exists(outdir_i):
                         shutil.rmtree(outdir_i)
-                        print(Fore.RED + "Removed {}".format(outdir_i))
+                        log(Fore.RED + "Removed {}".format(outdir_i))
                     fail_label = base_f_i + '-' + var_f_i
-                print("- output: {}".format(outdir_i))
+                log("- output: {}".format(outdir_i))
                 if input_dir_i != outdir_i:
-                    print("- input:  {}".format(input_dir_i))
+                    log("- input:  {}".format(input_dir_i))
                 var_dir_to_types[var_nm_i] = var_type
+                progress_bar(var_idx, base_total, "{}:{} init".format(exp_nm, var_nm_i))
 #________________________________________________________________________________________________________________
 
                 # print(Fore.YELLOW + "Step 1: plan and save")
@@ -355,7 +394,7 @@ if __name__ == '__main__':
 #________________________________________________________________________________________________________________
 
                 path_suffix = '_path_yaw' if entry_path_yaw else ''
-                print(Fore.YELLOW + "Step 2: render from the sampled poses")
+                progress_bar(var_idx, base_total, "{}:{} render".format(exp_nm, var_nm_i))
                 render_dir_i = os.path.join(outdir_i, 'rendering')
                 if not args.skip_render:
                     ue_pose_fn = os.path.join(
@@ -363,7 +402,7 @@ if __name__ == '__main__':
 
                     if not os.path.exists(ue_pose_fn):
                         failed_cfgs.append(fail_label)
-                        print(Fore.RED + "Cannot find UE poses, plan failed? CONTINUE TO NEXT.")
+                        log(Fore.RED + "Cannot find UE poses, plan failed? CONTINUE TO NEXT.")
                         continue
                     if not os.path.exists(outdir_i):
                         os.makedirs(outdir_i)
@@ -375,15 +414,15 @@ if __name__ == '__main__':
                     #               " --save_sleep_sec 0.1 --unrealcv_in {}").format(
                     #                   ue_pose_fn, render_dir_i, args.unrealcv_ini)
 
-                    print(Fore.BLUE + render_cmd)
+                    log(Fore.BLUE + render_cmd)
                     subprocess.call(shlex.split(render_cmd))
                 else:
-                    print(Fore.BLUE + "> Skip rendering.")
+                    log(Fore.BLUE + "> Skip rendering.")
 
                 reg_name = var_nm_i
                 if path_suffix and not reg_name.endswith(path_suffix):
                     reg_name = reg_name + path_suffix
-                print(Fore.YELLOW + "Step 3: register images to colmap models")
+                progress_bar(var_idx, base_total, "{}:{} register".format(exp_nm, var_nm_i))
                 reg_img_dir_i = os.path.join(render_dir_i, 'images')
                 reg_img_nm_to_cam = os.path.join(render_dir_i, 'img_nm_to_colmap_cam.txt')
                 reg_missing = []
@@ -397,26 +436,26 @@ if __name__ == '__main__':
                     reg_missing.append(reg_img_nm_to_cam)
                 if not args.skip_reg:
                     if reg_missing:
-                        print(Fore.YELLOW + "Skip registration for {} (missing: {}).".format(
+                        log(Fore.YELLOW + "Skip registration for {} (missing: {}).".format(
                             outdir_i, ", ".join(reg_missing)))
                         failed_cfgs.append(fail_label + '-reg-missing')
-                        print(Fore.BLUE + "> Skip image registration.")
+                        log(Fore.BLUE + "> Skip image registration.")
                         reg_success = False
                     else:
                         gen_list_cmd = "{} --base_dir {} --img_dir {} --img_nm_to_cam_list {}".format(
                             gen_list_sc, base_img_dir, reg_img_dir_i,
                             reg_img_nm_to_cam)
-                        print(Fore.BLUE + gen_list_cmd)
+                        log(Fore.BLUE + gen_list_cmd)
                         subprocess.call(shlex.split(gen_list_cmd))
                         rel_image_list = os.path.join(render_dir_i, 'images/rel_img_path.txt')
                         rel_cam_list = os.path.join(render_dir_i, 'images/rel_img_nm_to_cam_list.txt')
                         if not os.path.exists(rel_image_list) or not os.path.exists(rel_cam_list):
-                            print(Fore.YELLOW + "Skip registration for {} (missing: {}{}).".format(
+                            log(Fore.YELLOW + "Skip registration for {} (missing: {}{}).".format(
                                 outdir_i,
                                 rel_image_list if not os.path.exists(rel_image_list) else "",
                                 ", " + rel_cam_list if not os.path.exists(rel_cam_list) else ""))
                             failed_cfgs.append(fail_label + '-reg-missing')
-                            print(Fore.BLUE + "> Skip image registration.")
+                            log(Fore.BLUE + "> Skip image registration.")
                             reg_success = False
                         else:
                             reg_cmd = ("{} {} --reg_name {} --reg_list_fn {} "
@@ -424,14 +463,14 @@ if __name__ == '__main__':
                                        "--min_num_inliers {}").format(
                                            reg_sc, args.base_model, reg_name, rel_image_list, rel_cam_list,
                                            args.min_num_inliers)
-                            print(Fore.BLUE + reg_cmd)
+                            log(Fore.BLUE + reg_cmd)
                             subprocess.call(shlex.split(reg_cmd))
                             reg_success = True
                 else:
-                    print(Fore.BLUE + "> Skip image registration.")
+                    log(Fore.BLUE + "> Skip image registration.")
                     reg_success = False
 
-                print(Fore.YELLOW + "Step 4: evaluate pose error")
+                progress_bar(var_idx, base_total, "{}:{} eval".format(exp_nm, var_nm_i))
                 if not args.skip_eval:
                     reg_model_dir_i = os.path.join(args.base_model, reg_name+"_sparse")
                     eval_missing = []
@@ -445,7 +484,7 @@ if __name__ == '__main__':
                     elif not _dir_has_images(reg_img_dir_i):
                         eval_missing.append(reg_img_dir_i + " (no images)")
                     if eval_missing:
-                        print(Fore.YELLOW + "Skip evaluation for {} (missing: {}).".format(
+                        log(Fore.YELLOW + "Skip evaluation for {} (missing: {}).".format(
                             outdir_i, ", ".join(eval_missing)))
                         failed_cfgs.append(fail_label + '-eval-missing')
                         continue
@@ -459,7 +498,7 @@ if __name__ == '__main__':
                                     cal_e_sc, reg_model_dir_i,
                                     reg_img_name_to_colmap,
                                     reg_img_dir_i, eval_outdir_i)
-                    print(Fore.BLUE + eval_cmd)
+                    log(Fore.BLUE + eval_cmd)
                     subprocess.call(shlex.split(eval_cmd))
                     if entry_path_yaw:
                         for fn in ['pose_errors.txt', 'registered_poses_ue.txt']:
@@ -474,12 +513,15 @@ if __name__ == '__main__':
                         if os.path.exists(eval_outdir_i) and not os.listdir(eval_outdir_i):
                             os.rmdir(eval_outdir_i)
                 else:
-                    print(Fore.BLUE + "> Skip evaluation.")
+                    log(Fore.BLUE + "> Skip evaluation.")
+                progress_bar(var_idx, base_total, "{}:{} done".format(exp_nm, var_nm_i))
+                if var_idx == base_total:
+                    progress_done()
             with open(os.path.join(base_outdir_i, 'analysis_cfg.yaml'), 'w') as f:
                 yaml.dump({'types': var_dir_to_types,
                            'max_trans_e_m': args.max_trans_e_m,
                            'max_rot_e_deg': args.max_rot_e_deg}, f, default_flow_style=False)
 
-    print(Fore.RED + "Failed configurations:")
+    log(Fore.RED + "Failed configurations:")
     for v in failed_cfgs:
-        print(Fore.RED + v)
+        log(Fore.RED + v)
