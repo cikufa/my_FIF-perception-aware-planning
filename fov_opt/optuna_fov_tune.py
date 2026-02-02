@@ -18,6 +18,15 @@ STAT_INDEX = {
     "std": 3,
 }
 
+SUPPORTED_FIXED_PARAMS = {
+    "max_iter",
+    "ks",
+    "base_step_scale",
+    "step_deg",
+    "traj_jac_step",
+    "fov_schedule",
+}
+
 
 def parse_error_stat(path: Path, stat: str):
     idx = STAT_INDEX[stat]
@@ -125,14 +134,6 @@ def build_search_space(trial, args):
         params["ks"] = trial.suggest_float(
             "ks", args.ks_range[0], args.ks_range[1], log=args.ks_log
         )
-    if "visibility_angle_deg" in fixed:
-        params["visibility_angle_deg"] = fixed["visibility_angle_deg"]
-    elif args.tune_visibility:
-        params["visibility_angle_deg"] = trial.suggest_float(
-            "visibility_angle_deg",
-            args.visibility_range[0],
-            args.visibility_range[1],
-        )
     if "base_step_scale" in fixed:
         params["base_step_scale"] = fixed["base_step_scale"]
     elif args.tune_base_step:
@@ -142,17 +143,11 @@ def build_search_space(trial, args):
             args.base_step_scale_range[1],
             log=args.base_step_scale_log,
         )
-    if "min_step_deg" in fixed:
-        params["min_step_deg"] = fixed["min_step_deg"]
-    elif args.tune_step_limits:
-        params["min_step_deg"] = trial.suggest_float(
-            "min_step_deg", args.min_step_range[0], args.min_step_range[1]
-        )
-    if "max_step_deg" in fixed:
-        params["max_step_deg"] = fixed["max_step_deg"]
-    elif args.tune_step_limits:
-        params["max_step_deg"] = trial.suggest_float(
-            "max_step_deg", args.max_step_range[0], args.max_step_range[1]
+    if "step_deg" in fixed:
+        params["step_deg"] = fixed["step_deg"]
+    elif args.tune_step_deg:
+        params["step_deg"] = trial.suggest_float(
+            "step_deg", args.step_deg_range[0], args.step_deg_range[1]
         )
     if "traj_jac_step" in fixed:
         params["traj_jac_step"] = fixed["traj_jac_step"]
@@ -170,9 +165,7 @@ def build_search_space(trial, args):
         )
     if args.ks_from_visibility and "ks" not in fixed:
         alpha = None
-        if "visibility_angle_deg" in params:
-            alpha = params["visibility_angle_deg"]
-        elif "fov_schedule" in params:
+        if "fov_schedule" in params:
             alpha = parse_schedule_last_alpha(params["fov_schedule"])
         if alpha is not None and args.ks_transition_deg:
             ks_suggested = suggest_ks(alpha, args.ks_transition_deg)
@@ -204,14 +197,11 @@ def make_env(params, base_env):
         env["FOV_OPT_MAX_ITER"] = str(params["max_iter"])
     if "ks" in params:
         env["FOV_OPT_KS"] = f"{params['ks']:.8f}"
-    if "visibility_angle_deg" in params:
-        env["FOV_OPT_VIS_ANGLE_DEG"] = f"{params['visibility_angle_deg']:.8f}"
     if "base_step_scale" in params:
         env["FOV_OPT_BASE_STEP_SCALE"] = f"{params['base_step_scale']:.8f}"
-    if "min_step_deg" in params:
-        env["FOV_OPT_MIN_STEP_DEG"] = f"{params['min_step_deg']:.8f}"
-    if "max_step_deg" in params:
-        env["FOV_OPT_MAX_STEP_DEG"] = f"{params['max_step_deg']:.8f}"
+    if "step_deg" in params:
+        env["FOV_OPT_MIN_STEP_DEG"] = f"{params['step_deg']:.8f}"
+        env["FOV_OPT_MAX_STEP_DEG"] = f"{params['step_deg']:.8f}"
     if "traj_jac_step" in params:
         env["FOV_OPT_TRAJ_JAC_STEP"] = f"{params['traj_jac_step']:.8f}"
     if "fov_schedule" in params:
@@ -284,6 +274,21 @@ def write_yaml_config(path: Path, data):
         yaml.safe_dump(data, handle, default_flow_style=False, sort_keys=False)
 
 
+def normalize_fixed_params(raw):
+    if not isinstance(raw, dict):
+        return {}
+    fixed = {k: v for k, v in raw.items() if k in SUPPORTED_FIXED_PARAMS}
+    if "step_deg" not in fixed:
+        if "min_step_deg" in raw and "max_step_deg" in raw:
+            if raw["min_step_deg"] == raw["max_step_deg"]:
+                fixed["step_deg"] = raw["min_step_deg"]
+        elif "min_step_deg" in raw:
+            fixed["step_deg"] = raw["min_step_deg"]
+        elif "max_step_deg" in raw:
+            fixed["step_deg"] = raw["max_step_deg"]
+    return fixed
+
+
 def suggest_ks(alpha_deg: float, transition_deg: float):
     if alpha_deg <= 0.0 or transition_deg <= 0.0:
         return None
@@ -330,9 +335,8 @@ def validate_config(args):
         "log_jacobian",
         "tune_max_iter",
         "tune_ks",
-        "tune_visibility",
         "tune_base_step",
-        "tune_step_limits",
+        "tune_step_deg",
         "tune_traj_jac_step",
         "tune_fov_schedule",
         "ks_from_visibility",
@@ -354,31 +358,17 @@ def validate_config(args):
         require(key)
 
     if mode == "fixed":
-        supported = {
-            "max_iter",
-            "ks",
-            "visibility_angle_deg",
-            "base_step_scale",
-            "min_step_deg",
-            "max_step_deg",
-            "traj_jac_step",
-            "fov_schedule",
-        }
+        supported = SUPPORTED_FIXED_PARAMS
         if not isinstance(fixed, dict) or not any(k in fixed for k in supported):
             missing.append("fixed_params (with at least one supported key)")
 
     if args.tune_max_iter and "max_iter" not in fixed:
         require("max_iter_range")
-    if args.tune_visibility and "visibility_angle_deg" not in fixed:
-        require("visibility_range")
     if args.tune_base_step and "base_step_scale" not in fixed:
         require("base_step_scale_range")
         require("base_step_scale_log")
-    if args.tune_step_limits:
-        if "min_step_deg" not in fixed:
-            require("min_step_range")
-        if "max_step_deg" not in fixed:
-            require("max_step_range")
+    if args.tune_step_deg and "step_deg" not in fixed:
+        require("step_deg_range")
     if args.tune_traj_jac_step and "traj_jac_step" not in fixed:
         require("traj_jac_step_range")
     if args.tune_fov_schedule and "fov_schedule" not in fixed:
@@ -392,14 +382,12 @@ def validate_config(args):
         require("ks_transition_deg")
         require("ks_visibility_range_multipliers")
         has_alpha = False
-        if args.tune_visibility and "visibility_angle_deg" not in fixed:
-            has_alpha = True
         if args.tune_fov_schedule and "fov_schedule" not in fixed:
             has_alpha = True
-        if "visibility_angle_deg" in fixed or "fov_schedule" in fixed:
+        if "fov_schedule" in fixed:
             has_alpha = True
         if not has_alpha:
-            missing.append("visibility_angle_deg or fov_schedule (for ks_from_visibility)")
+            missing.append("fov_schedule (for ks_from_visibility)")
 
     has_split_cmd = bool(args.run_cmd_optimization or args.run_cmd_registration_along_path or args.run_cmd_registration_normal)
     if has_split_cmd:
@@ -417,6 +405,73 @@ def validate_config(args):
 
     if args.fixed_params is not None and not isinstance(args.fixed_params, dict):
         raise SystemExit("fixed_params must be a mapping of param names to values.")
+    if args.initial_params is not None and not isinstance(args.initial_params, dict):
+        raise SystemExit("initial_params must be a mapping of param names to values.")
+
+
+def _tunable_keys(args, fixed):
+    keys = []
+    if args.tune_max_iter and "max_iter" not in fixed:
+        keys.append("max_iter")
+    if args.tune_ks and "ks" not in fixed:
+        keys.append("ks")
+    if args.tune_base_step and "base_step_scale" not in fixed:
+        keys.append("base_step_scale")
+    if args.tune_step_deg and "step_deg" not in fixed:
+        keys.append("step_deg")
+    if args.tune_traj_jac_step and "traj_jac_step" not in fixed:
+        keys.append("traj_jac_step")
+    if args.tune_fov_schedule and "fov_schedule" not in fixed:
+        keys.append("fov_schedule")
+    return keys
+
+
+def _validate_initial_params(args, fixed):
+    if not args.enqueue_initial or not args.initial_params:
+        return {}
+    tunable = set(_tunable_keys(args, fixed))
+    initial = {k: v for k, v in args.initial_params.items() if k in tunable}
+    if not initial:
+        return {}
+    # Range checks for numeric params.
+    def in_range(name, value, rmin, rmax):
+        if value < rmin or value > rmax:
+            raise SystemExit(
+                f"initial_params[{name}]={value} out of range [{rmin}, {rmax}]"
+            )
+    max_iter_range = getattr(args, "max_iter_range", None)
+    ks_range = getattr(args, "ks_range", None)
+    base_step_scale_range = getattr(args, "base_step_scale_range", None)
+    step_deg_range = getattr(args, "step_deg_range", None)
+    traj_jac_step_range = getattr(args, "traj_jac_step_range", None)
+    fov_schedule_options = getattr(args, "fov_schedule_options", None)
+
+    if "max_iter" in initial and max_iter_range:
+        in_range("max_iter", initial["max_iter"], max_iter_range[0], max_iter_range[1])
+    if "ks" in initial and ks_range and not args.ks_from_visibility:
+        in_range("ks", initial["ks"], ks_range[0], ks_range[1])
+    if "base_step_scale" in initial and base_step_scale_range:
+        in_range(
+            "base_step_scale",
+            initial["base_step_scale"],
+            base_step_scale_range[0],
+            base_step_scale_range[1],
+        )
+    if "step_deg" in initial and step_deg_range:
+        in_range("step_deg", initial["step_deg"], step_deg_range[0], step_deg_range[1])
+    if "traj_jac_step" in initial and traj_jac_step_range:
+        in_range(
+            "traj_jac_step",
+            initial["traj_jac_step"],
+            traj_jac_step_range[0],
+            traj_jac_step_range[1],
+        )
+    if "fov_schedule" in initial and fov_schedule_options:
+        if initial["fov_schedule"] not in fov_schedule_options:
+            raise SystemExit(
+                "initial_params[fov_schedule] must be one of fov_schedule_options"
+            )
+    return initial
 
 
 def main():
@@ -424,6 +479,8 @@ def main():
     parser.add_argument("--config", default="", help="Path to YAML config file.")
     parser.add_argument("--mode", choices=["tune", "fixed"], default=None)
     parser.add_argument("--along-path", action="store_true", default=None)
+    parser.add_argument("--normal", action="store_false", dest="along_path", default=None,
+                        help="force along_path false")
     parser.add_argument("--run-cmd", help="Command that runs the full pipeline.")
     parser.add_argument("--workdir", help="Working directory for run-cmd.")
     parser.add_argument("--error-stat", help="Path to error_stat.txt.")
@@ -445,14 +502,11 @@ def main():
     parser.add_argument("--tune-ks", action="store_true", default=None)
     parser.add_argument("--ks-range", type=float, nargs=2)
     parser.add_argument("--ks-log", action="store_true", default=None)
-    parser.add_argument("--tune-visibility", action="store_true", default=None)
-    parser.add_argument("--visibility-range", type=float, nargs=2)
     parser.add_argument("--tune-base-step", action="store_true", default=None)
     parser.add_argument("--base-step-scale-range", type=float, nargs=2)
     parser.add_argument("--base-step-scale-log", action="store_true", default=None)
-    parser.add_argument("--tune-step-limits", action="store_true", default=None)
-    parser.add_argument("--min-step-range", type=float, nargs=2)
-    parser.add_argument("--max-step-range", type=float, nargs=2)
+    parser.add_argument("--tune-step-deg", action="store_true", default=None)
+    parser.add_argument("--step-deg-range", type=float, nargs=2)
     parser.add_argument("--tune-traj-jac-step", action="store_true", default=None)
     parser.add_argument("--traj-jac-step-range", type=float, nargs=2)
     parser.add_argument("--tune-fov-schedule", action="store_true", default=None)
@@ -481,6 +535,11 @@ def main():
 
     if args.trial_log is None:
         args.trial_log = True
+
+    if not hasattr(args, "enqueue_initial") or args.enqueue_initial is None:
+        args.enqueue_initial = False
+    if not hasattr(args, "initial_params") or args.initial_params is None:
+        args.initial_params = {}
 
     if args.optuna_log_level:
         level = getattr(optuna.logging, str(args.optuna_log_level).upper(), None)
@@ -513,12 +572,22 @@ def main():
             "Provide error_stat, pose_errors, pose_errors_files, or error_stat_files in the YAML config."
         )
 
+    # In fixed mode, allow running directly from best_params_yaml without manual copy.
+    if args.mode == "fixed":
+        current_fixed = getattr(args, "fixed_params", None)
+        if isinstance(current_fixed, dict) and current_fixed:
+            args.fixed_params = normalize_fixed_params(current_fixed)
+        else:
+            best_yaml = getattr(args, "best_params_yaml", None)
+            if best_yaml and Path(best_yaml).exists():
+                best_data = load_yaml_config(Path(best_yaml))
+                args.fixed_params = normalize_fixed_params(best_data.get("fixed_params"))
+
     if args.mode == "fixed":
         args.tune_max_iter = False
         args.tune_ks = False
-        args.tune_visibility = False
         args.tune_base_step = False
-        args.tune_step_limits = False
+        args.tune_step_deg = False
         args.tune_traj_jac_step = False
         args.tune_fov_schedule = False
 
@@ -545,6 +614,11 @@ def main():
             load_if_exists=True,
             sampler=optuna.samplers.TPESampler(seed=args.seed if args.seed else None),
         )
+
+    fixed = args.fixed_params or {}
+    initial = _validate_initial_params(args, fixed)
+    if initial:
+        study.enqueue_trial(initial)
 
     workdir = Path(args.workdir).resolve()
     error_stat_path = Path(args.error_stat).resolve() if args.error_stat else None
@@ -598,8 +672,6 @@ def main():
             except Exception:
                 best_obj = None
             vis_alpha = params.get("visibility_alpha_deg")
-            if vis_alpha is None:
-                vis_alpha = params.get("visibility_angle_deg")
             log_parts = [
                 "[trial {}] obj={}".format(trial.number, "{:.6f}".format(current_obj) if current_obj is not None else "n/a"),
                 "best={}".format("{:.6f}".format(best_obj) if best_obj is not None else "n/a"),
@@ -612,12 +684,9 @@ def main():
                 for k in (
                     "max_iter",
                     "ks",
-                    "visibility_angle_deg",
-                    "visibility_alpha_deg",
-                    "base_step_scale",
-                    "min_step_deg",
-                    "max_step_deg",
-                    "traj_jac_step",
+            "base_step_scale",
+            "step_deg",
+            "traj_jac_step",
                     "fov_schedule",
                 )
                 if k in params

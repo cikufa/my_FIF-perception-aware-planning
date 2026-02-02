@@ -1,5 +1,5 @@
 run_cmd: ""
-along_path: false
+along_path: True
 run_cmd_along_path: "./run_fov_opt_rrt_none.sh --both && python3 run_planner_exp.py /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/warehouse_all.yaml --defaults_yaml /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults.yaml --along_path"
 run_cmd_normal: "./run_fov_opt_rrt_none.sh --both && python3 run_planner_exp.py /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/warehouse_all.yaml --defaults_yaml /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults.yaml"
 run_cmd_optimization: "./run_fov_opt_rrt_none.sh --both"
@@ -22,9 +22,9 @@ pose_errors_files_normal:
 error_stat_files_along_path: []
 error_stat_files_normal: []
 stat: "avg"
-n_trials: 100
+n_trials: 10
 timeout: 0
-n_jobs: 8 # If GPU is free enough, run n_jobs > 1 in Optuna.
+n_jobs: 1 # If GPU is free enough, run n_jobs > 1 in Optuna.
 study_name: "fov_optuna"
 storage: ""
 seed: 0 
@@ -41,16 +41,22 @@ optuna_log_level: "CRITICAL"
 results_jsonl: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace/optuna_trials.jsonl"
 best_params_yaml: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace/optuna_best_params.yaml"
 pareto_params_yaml: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace/optuna_pareto_params.yaml"
+enqueue_initial: true
+initial_params:
+  max_iter: 30
+  ks: 15
+  base_step_scale: 1.0
+  step_deg: 0.25
+  traj_jac_step: 0.5
+  fov_schedule: "180,90,60,30"
 
 tune_max_iter: true
 max_iter_range: [10, 50]
-tune_visibility: false
 tune_base_step: true
 base_step_scale_range: [0.2, 2.0]
 base_step_scale_log: false
-tune_step_limits: true
-min_step_range: [0.05, 1.0]
-max_step_range: [0.5, 3.0]
+tune_step_deg: true
+step_deg_range: [0.05, 3.0]
 tune_traj_jac_step: true
 traj_jac_step_range: [0.1, 0.7]
 tune_fov_schedule: true
@@ -72,10 +78,8 @@ ks_visibility_range_multipliers: [0.8, 1.2]
 # fixed_params:
 #   max_iter: 30
 #   ks: 15
-#   visibility_angle_deg: 30
 #   base_step_scale: 1.0
-#   min_step_deg: 0.25
-#   max_step_deg: 5.0
+#   step_deg: 0.25
 #   traj_jac_step: 0.5
 #   fov_schedule: "180,90,60,30"
 fixed_params: {}
