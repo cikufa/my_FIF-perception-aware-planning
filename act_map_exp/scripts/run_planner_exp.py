@@ -14,6 +14,7 @@ init(autoreset=True)
 
 VERBOSE = False
 PROGRESS = False
+SHOW_SUBPROCESS = False
 
 
 def log(msg):
@@ -38,6 +39,13 @@ def progress_done():
         return
     sys.stdout.write("\n")
     sys.stdout.flush()
+
+
+def run_subprocess(cmd_tokens):
+    if SHOW_SUBPROCESS:
+        return subprocess.call(cmd_tokens)
+    with open(os.devnull, 'w') as devnull:
+        return subprocess.call(cmd_tokens, stdout=devnull, stderr=devnull)
 
 
 def _parseConfig(cfg_fn):
@@ -118,6 +126,39 @@ def _parse_optimized_dir_specs(specs):
     return named, paths
 
 
+def _limit_registration_lists(rel_image_list, rel_cam_list, max_reg_images):
+    if max_reg_images is None or max_reg_images <= 0:
+        return None
+    if not os.path.exists(rel_image_list) or not os.path.exists(rel_cam_list):
+        return None
+
+    with open(rel_image_list, 'r') as f:
+        img_lines = [ln for ln in f.readlines() if ln.strip()]
+    with open(rel_cam_list, 'r') as f:
+        cam_lines = [ln for ln in f.readlines() if ln.strip()]
+
+    n = min(len(img_lines), len(cam_lines))
+    if n == 0:
+        return (0, 0)
+    if n <= max_reg_images:
+        return (n, n)
+
+    if max_reg_images == 1:
+        idx = [0]
+    else:
+        idx = [(i * (n - 1)) // (max_reg_images - 1) for i in range(max_reg_images)]
+
+    img_sel = [img_lines[i] for i in idx]
+    cam_sel = [cam_lines[i] for i in idx]
+
+    with open(rel_image_list, 'w') as f:
+        f.writelines(img_sel)
+    with open(rel_cam_list, 'w') as f:
+        f.writelines(cam_sel)
+
+    return (n, len(img_sel))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('config_yaml', type=str, help='yaml')
@@ -146,6 +187,8 @@ if __name__ == '__main__':
     parser.add_argument('--only_optimized', action='store_true',
                         help='when set, run steps only for variation '
                              "type 'optimized'")
+    parser.add_argument('--skip_optimized', action='store_true',
+                        help='skip variations with type optimized (including optimized_path_yaw)')
     parser.add_argument('--optimized_dir', type=str, default=None,
                         help='path to the optimized folder to use when '
                              '--only_optimized is set')
@@ -154,14 +197,28 @@ if __name__ == '__main__':
                              'for --only_optimized; order should match base list')
 
     parser.add_argument('--min_num_inliers', type=int, default=10)
+    parser.add_argument('--max_reg_images', type=int, default=0,
+                        help='limit number of registration images per run (0 = use all)')
     parser.add_argument('--max_trans_e_m', type=float, default=0.5)
     parser.add_argument('--max_rot_e_deg', type=float, default=10.0)
+    parser.add_argument('--render_width', type=int, default=None,
+                        help='override render image width (only for rendering step)')
+    parser.add_argument('--render_height', type=int, default=None,
+                        help='override render image height (only for rendering step)')
+    parser.add_argument('--render_fov', type=float, default=None,
+                        help='override render horizontal FOV in degrees')
+    parser.add_argument('--render_sleep', type=float, default=None,
+                        help='override render sleep seconds between poses')
 
     parser.add_argument('--exp_nm_rm_sufix', type=str, default='_base')
     parser.add_argument('--along_path', action='store_true',
                         help='use stamped_Twc_ue_path_yaw and path_yaw output names')
     parser.add_argument('--verbose', action='store_true',
                         help='enable verbose logging')
+    parser.add_argument('--show_subprocess', action='store_true',
+                        help='show stdout/stderr from subprocess commands')
+    parser.add_argument('--fail_on_error', action='store_true',
+                        help='exit non-zero if any stage fails for any config')
     parser.add_argument('--no_progress', action='store_true',
                         help='disable progress bar')
     parser.add_argument('--progress', action='store_true',
@@ -174,6 +231,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     VERBOSE = bool(args.verbose)
     PROGRESS = bool(args.progress)
+    SHOW_SUBPROCESS = bool(args.show_subprocess)
     if args.defaults_yaml:
         if not os.path.exists(args.defaults_yaml):
             parser.error("defaults_yaml does not exist: {}".format(args.defaults_yaml))
@@ -208,6 +266,8 @@ if __name__ == '__main__':
     opt_only = args.only_optimized and (opt_named or opt_list)
     if args.only_optimized and not opt_only:
         parser.error("--only_optimized requires --optimized_dir or --optimized_dirs to be set")
+    if args.only_optimized and args.skip_optimized:
+        parser.error("--only_optimized and --skip_optimized are mutually exclusive")
 
     # if args.skip_render or args.skip_plan or args.skip_reg:
     #     print(Fore.YELLOW + "Not clearing stuff due to skipping steps.") 
@@ -309,6 +369,9 @@ if __name__ == '__main__':
                 return added
 
             if opt_only:
+                if args.skip_optimized:
+                    log(Fore.YELLOW + "Skip optimized entries (skip_optimized set).")
+                    continue
                 opt_dir = _resolve_opt_dir(exp_nm, base_idx, base_names)
                 if opt_dir is None:
                     log(Fore.RED + "No optimized directory specified for base {}.".format(exp_nm))
@@ -323,7 +386,7 @@ if __name__ == '__main__':
                         'outdir': None,  # to be filled
                         'path_yaw': False
                     })
-                if args.along_path and (opt_named or opt_list):
+                if (not args.skip_optimized) and args.along_path and (opt_named or opt_list):
                     opt_dir = _resolve_opt_dir(exp_nm, base_idx, base_names)
                     if opt_dir is not None:
                         _append_opt_entries(opt_dir)
@@ -348,6 +411,9 @@ if __name__ == '__main__':
                         var_opts_i = yaml.load(fvar, Loader=yaml.FullLoader)
                     if args.only_optimized and var_opts_i.get('type') != 'optimized':
                         log(Fore.BLUE + "> Skip variation (only_optimized set).")
+                        continue
+                    if args.skip_optimized and var_opts_i.get('type') in ('optimized', 'optimized_path_yaw'):
+                        log(Fore.BLUE + "> Skip variation (skip_optimized set).")
                         continue
                     var_nm_i = exp_nm + '_' + var_opts_i['type']
                     outdir_i = os.path.abspath(os.path.join(base_outdir_i, var_nm_i))
@@ -397,25 +463,46 @@ if __name__ == '__main__':
                 progress_bar(var_idx, base_total, "{}:{} render".format(exp_nm, var_nm_i))
                 render_dir_i = os.path.join(outdir_i, 'rendering')
                 if not args.skip_render:
-                    ue_pose_fn = os.path.join(
-                        input_dir_i, 'stamped_Twc_ue{}.txt'.format(path_suffix))
+                    ue_pose_candidates = [
+                        os.path.join(input_dir_i, 'stamped_Twc_ue{}.txt'.format(path_suffix)),
+                        os.path.join(input_dir_i, 'optimized_stamped_Twc_ue{}.txt'.format(path_suffix)),
+                    ]
+                    ue_pose_fn = None
+                    for candidate in ue_pose_candidates:
+                        if os.path.exists(candidate):
+                            ue_pose_fn = candidate
+                            break
 
-                    if not os.path.exists(ue_pose_fn):
+                    if ue_pose_fn is None:
                         failed_cfgs.append(fail_label)
-                        log(Fore.RED + "Cannot find UE poses, plan failed? CONTINUE TO NEXT.")
+                        log(Fore.RED + "Cannot find UE poses (checked: {}). CONTINUE TO NEXT.".format(
+                            ", ".join(ue_pose_candidates)))
                         continue
                     if not os.path.exists(outdir_i):
                         os.makedirs(outdir_i)
 
                     render_cmd =  "{} {} --save_dir {}".format(
                         ren_list_sc, ue_pose_fn, render_dir_i)
+                    if args.render_width is not None:
+                        render_cmd += " --width {}".format(args.render_width)
+                    if args.render_height is not None:
+                        render_cmd += " --height {}".format(args.render_height)
+                    if args.render_fov is not None:
+                        render_cmd += " --fov {}".format(args.render_fov)
+                    if args.render_sleep is not None:
+                        render_cmd += " --sleep {}".format(args.render_sleep)
                  
                     # render_cmd = ("rosrun unrealcv_bridge render_from_poses.py {} --save_dir {}"
                     #               " --save_sleep_sec 0.1 --unrealcv_in {}").format(
                     #                   ue_pose_fn, render_dir_i, args.unrealcv_ini)
 
                     log(Fore.BLUE + render_cmd)
-                    subprocess.call(shlex.split(render_cmd))
+                    render_ret = run_subprocess(shlex.split(render_cmd))
+                    if render_ret != 0:
+                        failed_cfgs.append(fail_label + '-render-failed')
+                        log(Fore.RED + "Rendering failed for {} (exit code {}).".format(
+                            outdir_i, render_ret))
+                        continue
                 else:
                     log(Fore.BLUE + "> Skip rendering.")
 
@@ -446,7 +533,12 @@ if __name__ == '__main__':
                             gen_list_sc, base_img_dir, reg_img_dir_i,
                             reg_img_nm_to_cam)
                         log(Fore.BLUE + gen_list_cmd)
-                        subprocess.call(shlex.split(gen_list_cmd))
+                        gen_ret = run_subprocess(shlex.split(gen_list_cmd))
+                        if gen_ret != 0:
+                            log(Fore.RED + "generate_img_rel_path failed for {} (exit code {}).".format(
+                                outdir_i, gen_ret))
+                            failed_cfgs.append(fail_label + '-gen-list-failed')
+                            continue
                         rel_image_list = os.path.join(render_dir_i, 'images/rel_img_path.txt')
                         rel_cam_list = os.path.join(render_dir_i, 'images/rel_img_nm_to_cam_list.txt')
                         if not os.path.exists(rel_image_list) or not os.path.exists(rel_cam_list):
@@ -458,13 +550,27 @@ if __name__ == '__main__':
                             log(Fore.BLUE + "> Skip image registration.")
                             reg_success = False
                         else:
+                            if args.max_reg_images > 0:
+                                limit_info = _limit_registration_lists(
+                                    rel_image_list, rel_cam_list, args.max_reg_images)
+                                if limit_info is not None:
+                                    n_before, n_after = limit_info
+                                    if n_before > n_after:
+                                        log(Fore.BLUE + "Limit registration images: {} -> {}".format(
+                                            n_before, n_after))
                             reg_cmd = ("{} {} --reg_name {} --reg_list_fn {} "
                                        "--img_nm_to_colmap_cam_list {} --upref_no_time "
                                        "--min_num_inliers {}").format(
                                            reg_sc, args.base_model, reg_name, rel_image_list, rel_cam_list,
                                            args.min_num_inliers)
                             log(Fore.BLUE + reg_cmd)
-                            subprocess.call(shlex.split(reg_cmd))
+                            reg_ret = run_subprocess(shlex.split(reg_cmd))
+                            if reg_ret != 0:
+                                log(Fore.RED + "Registration failed for {} (exit code {}).".format(
+                                    outdir_i, reg_ret))
+                                failed_cfgs.append(fail_label + '-reg-failed')
+                                reg_success = False
+                                continue
                             reg_success = True
                 else:
                     log(Fore.BLUE + "> Skip image registration.")
@@ -494,12 +600,19 @@ if __name__ == '__main__':
                         if not os.path.exists(eval_outdir_i):
                             os.makedirs(eval_outdir_i)
                     eval_cmd = ("{} --reg_model_dir {} --reg_img_name_to_colmap_Tcw {}"
-                                " --reg_img_dir {} --output_path {}").format(
+                                " --reg_img_dir {} --output_path {}"
+                                " --acc_trans_thresh {} --acc_rot_thresh {}").format(
                                     cal_e_sc, reg_model_dir_i,
                                     reg_img_name_to_colmap,
-                                    reg_img_dir_i, eval_outdir_i)
+                                    reg_img_dir_i, eval_outdir_i,
+                                    args.max_trans_e_m, args.max_rot_e_deg)
                     log(Fore.BLUE + eval_cmd)
-                    subprocess.call(shlex.split(eval_cmd))
+                    eval_ret = run_subprocess(shlex.split(eval_cmd))
+                    if eval_ret != 0:
+                        log(Fore.RED + "Pose error evaluation failed for {} (exit code {}).".format(
+                            outdir_i, eval_ret))
+                        failed_cfgs.append(fail_label + '-eval-failed')
+                        continue
                     if entry_path_yaw:
                         for fn in ['pose_errors.txt', 'registered_poses_ue.txt']:
                             src_fn = os.path.join(eval_outdir_i, fn)
@@ -525,3 +638,5 @@ if __name__ == '__main__':
     log(Fore.RED + "Failed configurations:")
     for v in failed_cfgs:
         log(Fore.RED + v)
+    if failed_cfgs and args.fail_on_error:
+        sys.exit(1)

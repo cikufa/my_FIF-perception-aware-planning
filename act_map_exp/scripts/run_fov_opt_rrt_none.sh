@@ -7,7 +7,12 @@ gen_path_yaw="${script_dir}/generate_path_yaw.py"
 
 manifold_bin="${FOV_MANIFOLD_BIN:-${root_dir}/My_FoV_Optimization/Manifold_cpp/build/manifold_test_trajectory}"
 trace_root="${FOV_TRACE_ROOT:-${root_dir}/my_FIF-perception-aware-planning/act_map_exp/trace}"
-points3d="${FOV_POINTS3D:-${root_dir}/my_FIF-perception-aware-planning/act_map_exp/localization/warehouse_base/sparse/0/points3D.txt}"
+default_points3d_new="${root_dir}/my_FIF-perception-aware-planning/act_map_exp/exp_data/warehouse_base_model_r2_a20/sparse/0/points3D.txt"
+default_points3d_legacy="${root_dir}/my_FIF-perception-aware-planning/act_map_exp/localization/warehouse_base/sparse/0/points3D.txt"
+points3d="${FOV_POINTS3D:-${default_points3d_new}}"
+if [[ ! -f "${points3d}" && -f "${default_points3d_legacy}" ]]; then
+  points3d="${default_points3d_legacy}"
+fi
 
 if [[ ! -x "${manifold_bin}" ]]; then
   echo "Missing manifold binary: ${manifold_bin}" >&2
