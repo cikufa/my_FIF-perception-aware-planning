@@ -48,4 +48,4 @@ ceres_cost:
   - ESDF: 2e4
   - Info: 1.5
 
-save_traj_abs_dir: /home/zichao/sources/FIF_ws/src/rpg_information_field/act_map_exp/trace/quad_traj_opt/warehouse_trial
+save_traj_abs_dir: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace/quad_traj_opt/warehouse_trial

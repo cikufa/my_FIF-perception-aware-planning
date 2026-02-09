@@ -1,7 +1,0 @@
-all_cfg:
-  base:
-    diagonal.yaml: diagonal
-  var:
-    - variations/none.yaml
-    - variations/gp_det.yaml
-    - variations/quad_det.yaml
