@@ -1,0 +1,42 @@
+colors:
+  none: red
+  gp_trace: green
+  gp_det: green
+  quad_trace: blue
+  quad_det: blue
+  pc_trace: gray
+  pc_det: gray
+  optimized: orange
+  optimized_path_yaw: orange
+linestyles:
+  none: solid
+  gp_trace: dashed
+  gp_det: solid
+  quad_trace: dashed
+  quad_det: solid
+  pc_trace: dashed
+  pc_det: solid
+  optimized: solid
+  optimized_path_yaw: dashed
+labels:
+  none: "No Info."
+  gp_trace: GP-Trace
+  gp_det: GP-Det
+  quad_det: Quad-Det
+  quad_trace: Quad-Trace
+  pc_det: PC-Det
+  pc_trace: PC-Trace
+  optimized: optimized
+  optimized_path_yaw: optimized_path_yaw
+ordered_types:
+  - none
+  - pc_trace
+  - pc_det
+  - gp_trace
+  - gp_det
+  - quad_trace
+  - quad_det
+  - optimized
+  - optimized_path_yaw
+hist_max_trans_e: 1
+hist_max_rot_e: 10
