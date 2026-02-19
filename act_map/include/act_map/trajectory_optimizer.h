@@ -29,10 +29,6 @@ template <typename T> void print(T x)
 
 
 
-
-
-
-
 class TrajectoryOptimizerOnManifold{
 public:
 	TrajectoryOptimizerOnManifold(std::string output_initial_trajectory_filename,std::string input_pointcloud_filename,std::string output_pointcloud_filename,bool use_direction, bool use_uncertainty,std::string input_direction_and_uncertainty_filename,std::string output_pointcloud_dir_filename,std::string input_trajectory_file,std::string output_trajectory_file){
@@ -76,7 +72,6 @@ public:
 			this->valid_points.push_back(i);
 		}		
 	}
-
 
 
 
@@ -130,15 +125,9 @@ public:
 		for (size_t i=0;i<this->loader.get_pointcloud().size();i++){
 			this->valid_points.push_back(i);
 		}
-
-		
-
-
-
 	}
 
 
-	
 	Eigen::Matrix3f skew(Eigen::Vector3f x){
 		Eigen::Matrix3f skew;
 		skew << 0, -x[2], x[1],
@@ -535,14 +524,12 @@ public:
 
 
 	void optimize(bool write_to_file){
-		std::cout<<"op <1>"<<std::endl;
 		for (int i =0;i<this->max_iteration;i++){
-			std::cout<<"op <2.0>"<<std::endl;
-			std::cout<<"this->trajectory size " <<this->trajectory.size()<<std::endl;
+	
 			std::vector<Eigen::Vector3f> trajecotry_jacobian=this->velocity_finite_differencing_jacobian(this->trajectory,0.5);
 
 			//file write will write the entire trajectory for the iteration
-			std::cout<<"op <2.1>"<<std::endl;
+			// std::cout<<"op <2.1>"<<std::endl;
 			if (write_to_file){
 				this->initial_trajectory_file<<std::endl;
 				Eigen::Matrix3f R=this->trajectory[0].get_rotation();
@@ -550,11 +537,11 @@ public:
 				//v_<<0,1,0;
 				v_=this->c;
 				v_=R*v_;
-				std::cout<<"op <2.2>"<<std::endl;
+				// std::cout<<"op <2.2>"<<std::endl;
 				this->write_arrow_to_file(this->trajectory[0].get_position(),v_);
 			}
 
-			std::cout<<"op <2>"<<std::endl;
+			// std::cout<<"op <2>"<<std::endl;
 
 
 
@@ -582,7 +569,7 @@ public:
 				}	
 			}
 
-			std::cout<<"op <3>"<<std::endl;
+			// std::cout<<"op <3>"<<std::endl;
 
 			if (write_to_file){
 				Eigen::Matrix3f R=this->trajectory.back().get_rotation();
@@ -593,7 +580,7 @@ public:
 				this->write_arrow_to_file(this->trajectory.back().get_position(),v__);
 			
 			}
-			std::cout<<"op <4>"<<std::endl;
+			// std::cout<<"op <4>"<<std::endl;
 
 		}
 

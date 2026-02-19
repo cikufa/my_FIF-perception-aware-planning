@@ -70,5 +70,6 @@
         "string_view": "cpp",
         "variant": "cpp",
         "*.ipp": "cpp"
-    }
+    },
+    "cmake.sourceDirectory": "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map"
 }

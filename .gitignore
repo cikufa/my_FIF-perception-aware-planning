@@ -1,0 +1,107 @@
+# General
+.DS_Store
+*.swp
+*.swo
+*~
+Thumbs.db
+desktop.ini
+*.zip
+*.txt
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Dependency directories
+node_modules/
+bower_components/
+vendor/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Debug files
+*.debug
+*.pdb
+*.idb
+*.ilk
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.venv
+
+# IDE specific
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS generated
+ehthumbs.db
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Testing
+coverage/
+*.lcov
+.nyc_output
+
+# Package files
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Documentation
+*.chm
+*.pdf
+*.docx
+*.xlsx
+*.pptx
+
+# Project outputs / datasets
+warehouse_bin/
+act_map_exp/trace*/
+exp_data/
+
+
+#i added
+*.png
+*.jpg
+*.jpeg
+*.db
+*.txt
+*.vxblx
+*.db
+*.bin
+
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pyvenv.cfg
+pip-log.tx

@@ -2,6 +2,7 @@
 
 #include "act_map_exp/quad_rrt.h"
 #include <yaml-cpp/yaml.h>
+#include <cmath>
 #include <rpg_common/fs.h>
 #include <rpg_common_ros/params_helper.h>
 
@@ -256,17 +257,53 @@ void QuadRRT<T>::saveResults()
   const size_t n_pose = final_Twb_vec_.size();
   std::vector<double> dummy_time(n_pose);
   rpg::PoseVec Twc_vec(n_pose);
+  rpg::PoseVec Twc_traj_yaw_vec(n_pose);
   unrealcv_bridge::UEPoseVec Twc_vec_ue(n_pose);
+  auto trajYawFromIdx = [this](const size_t idx) {
+    Eigen::Vector3d dir;
+    if (idx + 1 < final_Twb_vec_.size())
+    {
+      dir = final_Twb_vec_[idx + 1].getPosition() -
+            final_Twb_vec_[idx].getPosition();
+    }
+    else if (idx > 0)
+    {
+      dir = final_Twb_vec_[idx].getPosition() -
+            final_Twb_vec_[idx - 1].getPosition();
+    }
+    else
+    {
+      dir = Eigen::Vector3d::UnitX();
+    }
+
+    const double xy_norm = dir.head<2>().norm();
+    if (xy_norm < 1e-6)
+    {
+      dir = Eigen::Vector3d::UnitX();
+    }
+    return std::atan2(dir.y(), dir.x());
+  };
   for (size_t idx = 0; idx < final_Twb_vec_.size(); idx++)
   {
-    Twc_vec[idx] = final_Twb_vec_[idx] * Tbc_;
+    const rpg::Pose& Twb = final_Twb_vec_[idx];
+    Twc_vec[idx] = Twb * Tbc_;
     unrealcv_bridge::TwcToUEPose(Twc_vec[idx], &(Twc_vec_ue[idx]));
+
+    const double traj_yaw = trajYawFromIdx(idx);
+    Eigen::Matrix3d rot_mat;
+    quadAccYawToRwb(Eigen::Vector3d::Zero(), traj_yaw, &rot_mat, nullptr,
+                    nullptr);
+    const rpg::Pose Twb_traj_yaw(rpg::Rotation(rot_mat),
+                                 Twb.getPosition());
+    Twc_traj_yaw_vec[idx] = Twb_traj_yaw * Tbc_;
     dummy_time[idx] = static_cast<double>(idx);
   }
   saveStampedPoses(dummy_time, final_Twb_vec_,
                    save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwbNm);
   saveStampedPoses(dummy_time, Twc_vec,
                    save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwcNm);
+  saveStampedPoses(dummy_time, Twc_traj_yaw_vec,
+                   save_abs_dir_ + "/stamped_Twc_traj_yaw.txt");
   saveStampedPoses(dummy_time, Twc_vec_ue,
                    save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwcUENm);
 

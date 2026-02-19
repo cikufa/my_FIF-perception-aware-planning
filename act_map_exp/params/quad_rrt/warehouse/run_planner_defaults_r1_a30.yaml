@@ -1,0 +1,12 @@
+top_outdir: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30
+colmap_script_dir: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/colmap_scripts
+base_model: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/exp_data/warehouse_base_model_r1_a30
+
+optimized_dirs:
+  top: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/top/top_none/optimized
+  diagonal: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/diagonal/diagonal_none/optimized
+  bottom: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/bottom/bottom_none/optimized
+  left: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/left/left_none/optimized
+  bigU: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/bigU/bigU_none/optimized
+  smallU: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/smallU/smallU_none/optimized
+  mid: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/mid/mid_none/optimized

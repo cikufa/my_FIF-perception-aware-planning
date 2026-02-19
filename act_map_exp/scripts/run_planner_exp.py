@@ -48,6 +48,32 @@ def run_subprocess(cmd_tokens):
         return subprocess.call(cmd_tokens, stdout=devnull, stderr=devnull)
 
 
+def _ensure_along_path_output(input_dir, output_dir, gen_path_yaw_sc):
+    if os.path.exists(os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt')):
+        return True
+    if not gen_path_yaw_sc or not os.path.exists(gen_path_yaw_sc):
+        log(Fore.YELLOW + "Missing generate_path_yaw.py: {}".format(gen_path_yaw_sc))
+        return False
+    twc_in = os.path.join(input_dir, 'stamped_Twc.txt')
+    if not os.path.exists(twc_in):
+        log(Fore.YELLOW + "Missing stamped_Twc.txt for along_path: {}".format(twc_in))
+        return False
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    cmd = ["python3", gen_path_yaw_sc, "--input_dir", input_dir, "--output_dir", output_dir]
+    log(Fore.BLUE + " ".join(cmd))
+    ret = run_subprocess(cmd)
+    if ret != 0:
+        log(Fore.RED + "generate_path_yaw failed for {} (exit code {}).".format(output_dir, ret))
+        return False
+    return os.path.exists(os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt'))
+
+
+def _copy_if_exists(src, dst):
+    if os.path.exists(src) and not os.path.exists(dst):
+        shutil.copy2(src, dst)
+
+
 def _parseConfig(cfg_fn):
     assert os.path.exists(cfg_fn)
     assert cfg_fn.endswith('.yaml')
@@ -285,6 +311,8 @@ if __name__ == '__main__':
     assert os.path.exists(args.base_model)
     base_img_dir = os.path.join(args.base_model, 'images')
     assert os.path.exists(base_img_dir)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    gen_path_yaw_sc = os.path.join(script_dir, 'generate_path_yaw.py')
 
     all_base_fns, all_base_names, all_var_fns = _parseConfig(args.config_yaml)
 
@@ -379,6 +407,21 @@ if __name__ == '__main__':
                     continue
                 if not _append_opt_entries(opt_dir):
                     continue
+                base_none_dir = os.path.abspath(os.path.join(
+                    base_outdir_i, "{}_none".format(exp_nm)))
+                if os.path.isdir(base_none_dir):
+                    var_entries.append({
+                        'special': 'along_path',
+                        'base_none_dir': base_none_dir,
+                        'outdir': os.path.join(base_none_dir, 'along_path'),
+                        'name': "{}_none_along_path".format(exp_nm),
+                        'type': 'along_path',
+                        'path_yaw': True
+                    })
+                else:
+                    log(Fore.YELLOW + "Missing base none folder for along_path: {}".format(
+                        base_none_dir))
+                    failed_cfgs.append(base_f_i + '-along-path-missing')
             else:
                 for var_f_i in var_fns:
                     var_entries.append({
@@ -393,7 +436,16 @@ if __name__ == '__main__':
 
             base_total = len(var_entries)
             for var_idx, var_entry in enumerate(var_entries, start=1):
-                if var_entry.get('cfg_fn') is None:
+                if var_entry.get('special') == 'along_path':
+                    log(Fore.RED + "===== Running along_path from none... =====")
+                    var_nm_i = var_entry['name']
+                    base_none_dir = var_entry['base_none_dir']
+                    input_dir_i = var_entry['outdir']
+                    outdir_i = input_dir_i
+                    var_type = var_entry.get('type', 'along_path')
+                    entry_path_yaw = True
+                    fail_label = base_f_i + '-along-path'
+                elif var_entry.get('cfg_fn') is None:
                     log(Fore.RED + "===== Running optimized folder {}... =====".format(var_entry['outdir']))
                     if var_entry['name'] == 'optimized':
                         var_nm_i = exp_nm + '_optimized'
@@ -420,15 +472,28 @@ if __name__ == '__main__':
                     input_dir_i = outdir_i
                     var_type = var_opts_i['type']
                     entry_path_yaw = var_entry.get('path_yaw', False)
+                    fail_label = base_f_i + '-' + var_f_i
                     if args.clear_output and os.path.exists(outdir_i):
                         shutil.rmtree(outdir_i)
                         log(Fore.RED + "Removed {}".format(outdir_i))
-                    fail_label = base_f_i + '-' + var_f_i
                 log("- output: {}".format(outdir_i))
                 if input_dir_i != outdir_i:
                     log("- input:  {}".format(input_dir_i))
                 var_dir_to_types[var_nm_i] = var_type
                 progress_bar(var_idx, base_total, "{}:{} init".format(exp_nm, var_nm_i))
+                if var_entry.get('special') == 'along_path':
+                    if not os.path.isdir(base_none_dir):
+                        failed_cfgs.append(fail_label + '-missing-none')
+                        log(Fore.RED + "Missing base none dir for along_path: {}".format(
+                            base_none_dir))
+                        continue
+                    if not _ensure_along_path_output(base_none_dir, outdir_i, gen_path_yaw_sc):
+                        failed_cfgs.append(fail_label + '-path-yaw')
+                        continue
+                    _copy_if_exists(os.path.join(base_none_dir, 'rrt_stats.txt'),
+                                    os.path.join(outdir_i, 'rrt_stats.txt'))
+                    _copy_if_exists(os.path.join(base_none_dir, 'rrt_plan_time_sec.txt'),
+                                    os.path.join(outdir_i, 'rrt_plan_time_sec.txt'))
 #________________________________________________________________________________________________________________
 
                 # print(Fore.YELLOW + "Step 1: plan and save")
@@ -618,8 +683,9 @@ if __name__ == '__main__':
                             src_fn = os.path.join(eval_outdir_i, fn)
                             if not os.path.exists(src_fn):
                                 continue
-                            base_nm, ext = os.path.splitext(fn)
-                            dst_fn = os.path.join(outdir_i, base_nm + path_suffix + ext)
+                            # For path-yaw runs, keep standard filenames since the folder name
+                            # already encodes the variation.
+                            dst_fn = os.path.join(outdir_i, fn)
                             if os.path.exists(dst_fn):
                                 os.remove(dst_fn)
                             shutil.move(src_fn, dst_fn)

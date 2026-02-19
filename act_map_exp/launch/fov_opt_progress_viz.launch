@@ -1,0 +1,24 @@
+<launch>
+  <arg name="trace_root" default="$(find act_map_exp)/trace"/>
+  <arg name="view" default="top"/>
+  <arg name="variant" default="none"/>
+  <!-- Use --path-yaw (default) or set to --normal -->
+  <arg name="mode_flag" default="--path-yaw"/>
+  <arg name="frame" default="world"/>
+  <arg name="topic" default="stamped_pose_viz"/>
+  <arg name="rate" default="2.0"/>
+  <arg name="extra_args" default=""/>
+
+  <node pkg="act_map_exp"
+        type="visualize_quiver_progress.py"
+        name="fov_opt_progress_viz"
+        output="screen"
+        args="--trace-root $(arg trace_root)
+              --view $(arg view)
+              --variant $(arg variant)
+              $(arg mode_flag)
+              --frame $(arg frame)
+              --topic $(arg topic)
+              --rate $(arg rate)
+              $(arg extra_args)"/>
+</launch>

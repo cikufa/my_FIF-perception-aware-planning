@@ -1,11 +1,12 @@
 all_cfg:
   base:
-    top.yaml: top
-    diagonal.yaml: diagonal
-    bottom.yaml: bottom
-    top_long_sparse.yaml: top_long_sparse
-    diagonal_turns.yaml: diagonal_turns
-    bottom_dense_close.yaml: bottom_dense_close
+    # top.yaml: top
+    # diagonal.yaml: diagonal
+    # bottom.yaml: bottom
+    left.yaml: left
+    # bigU.yaml: bigU
+    # smallU.yaml: smallU
+    # mid.yaml: mid
   var:
     - variations/none.yaml
     - variations/gp_det.yaml
@@ -14,3 +15,4 @@ all_cfg:
     - variations/gp_trace.yaml
     - variations/quad_trace.yaml
     - variations/pc_trace.yaml
+ 

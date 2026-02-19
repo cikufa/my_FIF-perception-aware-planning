@@ -242,63 +242,63 @@ TODO:/* kernel initializaton */
     tbuild_gp_trace += timer.stop();
 
     /* ADDED:++++++++++++++++++++++++++++++++++++++++++++++++MONTE CARLO ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
-		ref_point = vox_pos[i];
-    map.normalized_points_ = my_populate_local_indexes(map.points_, ref_point); //normalize map according to ref point
-    std::tie(mean_center_of_all_pointsme, mean_center_of_all_pointsch) = my_calculate_pointcloud_mean(map.points_);
-    mean<< std::to_string(mean_center_of_all_pointsme[0])<<","<< std::to_string(mean_center_of_all_pointsme[1])<<","<<std::to_string(mean_center_of_all_pointsme[2])<<","<<std::to_string(mean_center_of_all_pointsch[0])<<","<< std::to_string(mean_center_of_all_pointsch[1])<<","<< std::to_string(mean_center_of_all_pointsch[2])<<std::endl;
-    starting_c=mean_center_of_all_pointsme-ref_point;    
-    // /*NOTE:cast*/   
-    starting_c_casted = starting_c.cast<float>();
-    points_list_casted = castEigenMatrixToStdVector(map.normalized_points_.cast<float>());
-    ref_point_casted = ref_point.cast<float>();
+		// ref_point = vox_pos[i];
+    // map.normalized_points_ = my_populate_local_indexes(map.points_, ref_point); //normalize map according to ref point
+    // std::tie(mean_center_of_all_pointsme, mean_center_of_all_pointsch) = my_calculate_pointcloud_mean(map.points_);
+    // mean<< std::to_string(mean_center_of_all_pointsme[0])<<","<< std::to_string(mean_center_of_all_pointsme[1])<<","<<std::to_string(mean_center_of_all_pointsme[2])<<","<<std::to_string(mean_center_of_all_pointsch[0])<<","<< std::to_string(mean_center_of_all_pointsch[1])<<","<< std::to_string(mean_center_of_all_pointsch[2])<<std::endl;
+    // starting_c=mean_center_of_all_pointsme-ref_point;    
+    // // /*NOTE:cast*/   
+    // starting_c_casted = starting_c.cast<float>();
+    // points_list_casted = castEigenMatrixToStdVector(map.normalized_points_.cast<float>());
+    // ref_point_casted = ref_point.cast<float>();
 
-    manifold=new FovOptimizerOnManifold("FOV_30degree.pdf",true,15.0,true,points_list_casted,starting_c_casted,true, ref_point_casted);
-		// VLOG(1) << "-----------------after manifold";
-    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-		manifold->optimize();
-		std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-		// std::cout << "Optimizer Time Difference = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;	
-		int time_us=std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
-		optimizer_monte_carlo_total_time_us+=(float)time_us;
-		optimizer_avg_time_file<<std::to_string((float)time_us)<<std::endl;
+    // manifold=new FovOptimizerOnManifold("FOV_30degree.pdf",true,15.0,true,points_list_casted,starting_c_casted,true, ref_point_casted);
+		// // VLOG(1) << "-----------------after manifold";
+    // std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+		// manifold->optimize();
+		// std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+		// // std::cout << "Optimizer Time Difference = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;	
+		// int time_us=std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+		// optimizer_monte_carlo_total_time_us+=(float)time_us;
+		// optimizer_avg_time_file<<std::to_string((float)time_us)<<std::endl;
 
-		quiver_head=(manifold->get_R())*starting_c_casted;    /*rpg::PositionVec*/
-    quiver_head=quiver_head/quiver_head.norm();
-    // starting_c_debug << starting_c<<","<< starting_c_casted<<std::endl;
+		// quiver_head=(manifold->get_R())*starting_c_casted;    /*rpg::PositionVec*/
+    // quiver_head=quiver_head/quiver_head.norm();
+    // // starting_c_debug << starting_c<<","<< starting_c_casted<<std::endl;
 
-    quiversfile << std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(quiver_head[0])<<","<< std::to_string(quiver_head[1])<<","<< std::to_string(quiver_head[2])<<std::endl;
-    // std::cout<< "testttttttttt" <<std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(quiver_head[0])<<","<< std::to_string(quiver_head[1])<<","<< std::to_string(quiver_head[2])<<std::endl;
+    // quiversfile << std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(quiver_head[0])<<","<< std::to_string(quiver_head[1])<<","<< std::to_string(quiver_head[2])<<std::endl;
+    // // std::cout<< "testttttttttt" <<std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(quiver_head[0])<<","<< std::to_string(quiver_head[1])<<","<< std::to_string(quiver_head[2])<<std::endl;
 
     //----------------------------------------------------Brute Force-------------------------------------------
-    begin = std::chrono::steady_clock::now();
-    manifold->brute_force_search();
-    end = std::chrono::steady_clock::now();
-    std::cout << "Brute Forceeeeeeeeeeeeeeeeeeee Time Difference = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;	
-    time_us=std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
-    brute_force_search_total_time_us+=(float)time_us;				
-    brute_force_avg_time_file<<std::to_string((float)time_us)<<std::endl;
-    brute_force_quiver_head=manifold->get_brute_force_best_vector();
+  //   begin = std::chrono::steady_clock::now();
+  //   manifold->brute_force_search();
+  //   end = std::chrono::steady_clock::now();
+  //   std::cout << "Brute Forceeeeeeeeeeeeeeeeeeee Time Difference = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;	
+  //   time_us=std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+  //   brute_force_search_total_time_us+=(float)time_us;				
+  //   brute_force_avg_time_file<<std::to_string((float)time_us)<<std::endl;
+  //   brute_force_quiver_head=manifold->get_brute_force_best_vector();
 
-    float degree_between =acos(brute_force_quiver_head.transpose()*quiver_head)*180.0/M_PI;
-    // std::cout << "quiver_head" << quiver_head <<std::endl;
-    // print_string("degree_between");
-    // print_float(degree_between);
-    degree_diff_record.push_back(degree_between);
-    optimizer_accuracy_file<<std::to_string(degree_between)<<","<<std::to_string(manifold->get_brute_force_max_feature())<<","<<std::to_string(manifold->get_optimized_max_feature())<<","<<std::endl;
-    brute_force_quiversfile<< std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(brute_force_quiver_head[0])<<","<< std::to_string(brute_force_quiver_head[1])<<","<< std::to_string(brute_force_quiver_head[2])<<std::endl;
+  //   float degree_between =acos(brute_force_quiver_head.transpose()*quiver_head)*180.0/M_PI;
+  //   // std::cout << "quiver_head" << quiver_head <<std::endl;
+  //   // print_string("degree_between");
+  //   // print_float(degree_between);
+  //   degree_diff_record.push_back(degree_between);
+  //   optimizer_accuracy_file<<std::to_string(degree_between)<<","<<std::to_string(manifold->get_brute_force_max_feature())<<","<<std::to_string(manifold->get_optimized_max_feature())<<","<<std::endl;
+  //   brute_force_quiversfile<< std::to_string(ref_point[0])<<","<< std::to_string(ref_point[1])<<","<< std::to_string(ref_point[2])<<","<< std::to_string(brute_force_quiver_head[0])<<","<< std::to_string(brute_force_quiver_head[1])<<","<< std::to_string(brute_force_quiver_head[2])<<std::endl;
     
-    delete manifold;
+  //   delete manifold;
 
-  }
-  brute_force_search_average_time_us=brute_force_search_total_time_us/kNCompute;  //  /(x_resolution*y_resolution*z_resolution);
-	brute_force_avg_time_file<<std::to_string(brute_force_search_average_time_us)<<std::endl;
-	// std::cout<<"brute_force_monte_carlo_average_time is "<<brute_force_search_average_time_us<<" [us]"<<std::endl;
+  // }
+  // brute_force_search_average_time_us=brute_force_search_total_time_us/kNCompute;  //  /(x_resolution*y_resolution*z_resolution);
+	// brute_force_avg_time_file<<std::to_string(brute_force_search_average_time_us)<<std::endl;
+	// // std::cout<<"brute_force_monte_carlo_average_time is "<<brute_force_search_average_time_us<<" [us]"<<std::endl;
 
-	optimizer_monte_carlo_average_time_us=optimizer_monte_carlo_total_time_us/kNCompute; // /(x_resolution*y_resolution*z_resolution);
-	// std::cout<<"optimizer_monte_carlo_average_time is "<<optimizer_monte_carlo_average_time_us<<" [us]"<<std::endl;
-	optimizer_avg_time_file<<std::to_string(optimizer_monte_carlo_average_time_us)<<std::endl;
+	// optimizer_monte_carlo_average_time_us=optimizer_monte_carlo_total_time_us/kNCompute; // /(x_resolution*y_resolution*z_resolution);
+	// // std::cout<<"optimizer_monte_carlo_average_time is "<<optimizer_monte_carlo_average_time_us<<" [us]"<<std::endl;
+	// optimizer_avg_time_file<<std::to_string(optimizer_monte_carlo_average_time_us)<<std::endl;
 
-  quiversfile.close();
+  // quiversfile.close();
 
   VLOG(1) << "Done computing the kernels.";
 

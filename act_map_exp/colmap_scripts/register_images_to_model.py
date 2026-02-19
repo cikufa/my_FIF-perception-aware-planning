@@ -6,6 +6,7 @@ from colorama import Fore, init
 from datetime import datetime
 import subprocess
 import shlex
+import sqlite3
 from shutil import copy2
 
 import utils.exp_utils as eu
@@ -13,6 +14,29 @@ import utils.colmap_utils as cu
 from utils.colmap_read_model import read_images_binary, read_cameras_text
 
 init(autoreset=True)
+
+
+def _sqlite_sidecars(db_path):
+    return [db_path + '-wal', db_path + '-shm']
+
+
+def _cleanup_sqlite_sidecars(db_path):
+    for sidecar in _sqlite_sidecars(db_path):
+        if os.path.exists(sidecar):
+            os.remove(sidecar)
+
+
+def _ensure_sqlite_integrity(db_path):
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute('PRAGMA integrity_check;')
+        row = cur.fetchone()
+        ok = row and row[0] == 'ok'
+    finally:
+        conn.close()
+    if not ok:
+        raise RuntimeError('SQLite integrity check failed for {}: {}'.format(db_path, row))
 
 
 if __name__ == '__main__':
@@ -94,11 +118,14 @@ if __name__ == '__main__':
         print("New database specified, will not copy.")
         new_base_db = args.new_database
         assert os.path.exists(new_base_db)
+        _cleanup_sqlite_sidecars(new_base_db)
     else:
         new_base_db = os.path.join(args.base_ws, '{}database{}.db'.format(upref, suffix))
         if os.path.exists(new_base_db):
             os.remove(new_base_db)
+        _cleanup_sqlite_sidecars(new_base_db)
         copy2(base_db, new_base_db)
+    _ensure_sqlite_integrity(new_base_db)
 
     base_tmp_dir = eu.createDir(os.path.join(args.base_ws, 'tmp_files'))
     print("Temporary files (image and match lists) will be written to {}".format(base_tmp_dir))

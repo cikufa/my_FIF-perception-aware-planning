@@ -1,0 +1,130 @@
+Panels:
+  - Class: rviz_common/Displays
+    Help Height: 78
+    Name: Displays
+    Tree Height: 594
+
+  - Class: rviz_common/Selection
+    Name: Selection
+
+  - Class: rviz_common/ToolProperties
+    Name: Tool Properties
+
+  - Class: rviz_common/Views
+    Name: Views
+
+  - Class: rviz_common/Time
+    Name: Time
+    SyncMode: 0
+    SyncSource: traj_pos
+
+Preferences:
+  PromptSaveOnExit: true
+
+Toolbars:
+  toolButtonStyle: 2
+
+Visualization Manager:
+  Class: ""
+  Enabled: true
+  Name: root
+
+  Global Options:
+    Background Color: 255; 255; 255
+    Default Light: true
+    Fixed Frame: world
+    Frame Rate: 30
+
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Plane: XY
+      Plane Cell Count: 10
+      Cell Size: 1
+      Color: 160; 160; 164
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+      Show Names: true
+      Show Axes: true
+      Show Arrows: true
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: occ_ftrs
+      Topic: /quad_rrt/occupied_vox
+      Enabled: true
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: FlatColor
+      Color: 237; 212; 0
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: esdf slice
+      Topic: /quad_rrt/esdf_slice
+      Enabled: true
+      Style: Flat Squares
+      Size (Pixels): 3
+      Color Transformer: Intensity
+      Invert Rainbow: true
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: traj_pos
+      Topic: /quad_rrt/traj_pos
+      Enabled: true
+      Style: Boxes
+      Size (Pixels): 6
+      Color Transformer: FlatColor
+      Color: 32; 74; 135
+
+    - Class: rviz_default_plugins/MarkerArray
+      Name: traj_orient
+      Topic: /quad_rrt/traj_orient
+      Enabled: true
+
+    - Class: rviz_default_plugins/Marker
+      Name: general_markers
+      Topic: /quad_rrt/general_markers
+      Enabled: true
+
+    - Class: rviz_default_plugins/Marker
+      Name: rrt_edges
+      Topic: /quad_rrt/rrt_edge
+      Enabled: true
+
+    - Class: voxblox_rviz_plugin/VoxbloxMesh
+      Name: VoxbloxMesh
+      Topic: /voxblox_node/mesh
+      Enabled: true
+
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic: /move_base_simple/goal
+    - Class: rviz_default_plugins/PublishPoint
+      Topic: /clicked_point
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 56.0
+      Pitch: 1.1
+      Yaw: 6.2
+      Focal Point:
+        X: -4.8
+        Y: 33.0
+        Z: 15.4
+
+Window Geometry:
+  Height: 1032
+  Width: 1916
+  X: 0
+  Y: 22
+

@@ -93,11 +93,11 @@ def fov_plot(points, opt_quivers, BF_quivers, quiversforonepoint):
     plt.show()
 
 
-points = np.loadtxt("/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map/maps/two_walls_points_w.txt", delimiter=' ')
-fov_quivers = np.loadtxt("/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map/FOVData/myquivers.csv", delimiter=',')
-quiversforonepoint = np.loadtxt("/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map/FOVData/quiversforonepoint.csv", delimiter=',')
-mean = np.loadtxt("/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map/FOVData/mean.csv", delimiter=',')
-BF_quivers = np.loadtxt("/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map/FOVData/single_run_brute_force_rotated_quivers.csv", delimiter=',')
+points = np.loadtxt("/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map/maps/two_walls_points_w.txt", delimiter=' ')
+fov_quivers = np.loadtxt("/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map/FOVData/myquivers.csv", delimiter=',')
+quiversforonepoint = np.loadtxt("/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map/FOVData/quiversforonepoint.csv", delimiter=',')
+mean = np.loadtxt("/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map/FOVData/mean.csv", delimiter=',')
+BF_quivers = np.loadtxt("/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map/FOVData/single_run_brute_force_rotated_quivers.csv", delimiter=',')
 
 print(quiversforonepoint)
 fov_plot(points, fov_quivers,BF_quivers, quiversforonepoint)

@@ -1,5 +1,6 @@
 colors:
   none: red
+  along_path: red
   gp_trace: green
   gp_det: green
   quad_trace: blue
@@ -10,6 +11,7 @@ colors:
   optimized_path_yaw: orange
 linestyles:
   none: solid
+  along_path: dotted
   gp_trace: dashed
   gp_det: solid
   quad_trace: dashed
@@ -20,6 +22,7 @@ linestyles:
   optimized_path_yaw: dashed
 labels:
   none: "No Info."
+  along_path: "Along-Path"
   gp_trace: GP-Trace
   gp_det: GP-Det
   quad_det: Quad-Det
@@ -30,6 +33,7 @@ labels:
   optimized_path_yaw: optimized_path_yaw
 ordered_types:
   - none
+  - along_path
   - pc_trace
   - pc_det
   - gp_trace

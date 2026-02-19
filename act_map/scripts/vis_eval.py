@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Load CSV file (update the path)
-csv_path = "/home/shekoufeh/FIF_ws/src/rpg_information_field/act_map/FOVData/optimizer_accuracy_file.csv"
+csv_path = "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map/FOVData/optimizer_accuracy_file.csv"
 
 df = pd.read_csv(csv_path)
 

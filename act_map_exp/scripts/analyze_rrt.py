@@ -25,6 +25,31 @@ kMinOutIter = -1
 kSecPerOutIter = 5.0
 
 
+def _collectSubdirs(cfg_dir):
+    subdir_map = {}
+    for name in sorted(os.listdir(cfg_dir)):
+        path = os.path.join(cfg_dir, name)
+        if os.path.isdir(path):
+            subdir_map[name] = path
+    for name, path in list(subdir_map.items()):
+        opt_dir = os.path.join(path, 'optimized')
+        if os.path.isdir(opt_dir):
+            opt_name = name + '_optimized'
+            if opt_name not in subdir_map:
+                subdir_map[opt_name] = opt_dir
+        opt_path_yaw_dir = os.path.join(path, 'optimized_path_yaw')
+        if os.path.isdir(opt_path_yaw_dir):
+            opt_name = name + '_optimized_path_yaw'
+            if opt_name not in subdir_map:
+                subdir_map[opt_name] = opt_path_yaw_dir
+        along_path_dir = os.path.join(path, 'along_path')
+        if os.path.isdir(along_path_dir):
+            along_name = name + '_along_path'
+            if along_name not in subdir_map:
+                subdir_map[along_name] = along_path_dir
+    return subdir_map
+
+
 def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
                      wandb_mod=None, wandb_prefix=""):
     print(Fore.RED + "==== process configuration {} ====".format(cfg_dir))
@@ -37,12 +62,12 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
         ana_cfg.update(base_cfg)
         print("Effective analysis configuration {}".format(ana_cfg))
 
+    subdir_map = _collectSubdirs(cfg_dir)
     if 'ordered_subdir_nms' in ana_cfg:
         subdir_nms = ana_cfg['ordered_subdir_nms']
     else:
-        subdir_nms = sorted([v for v in os.listdir(cfg_dir)
-                             if os.path.isdir(os.path.join(cfg_dir, v))])
-    subdirs = [os.path.join(cfg_dir, v) for v in subdir_nms]
+        subdir_nms = sorted(subdir_map.keys())
+    subdirs = [subdir_map.get(v, os.path.join(cfg_dir, v)) for v in subdir_nms]
     print("Going to analyze variations {}".format(subdir_nms))
 
     has_exact_solution = []

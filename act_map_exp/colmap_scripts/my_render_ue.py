@@ -112,7 +112,6 @@ def ueTwcToStandard(Twc_ue):
 def calculate_focal_length(width, h_fov_deg):
     return (width / 2) / np.tan(np.radians(h_fov_deg) / 2)
 
-
 def ue_to_colmap_pose(xyz, pyr):
     Twc_ue = np.eye(4)
     Twc_ue[0:3, 0:3] = eulerToRotmatUE(pyr[2], pyr[0], pyr[1])

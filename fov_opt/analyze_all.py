@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import subprocess
 from pathlib import Path
 
@@ -7,12 +8,21 @@ from pathlib import Path
 def main():
     root_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
-        description="Analyze all variations under act_map_exp/trace."
+        description="Analyze all variations under the trace root."
+    )
+    default_trace_root = os.environ.get(
+        "FOV_TRACE_ROOT",
+        str(root_dir / "act_map_exp" / "trace_r2_a20"),
     )
     parser.add_argument(
         "--top-dir",
-        default=str(root_dir / "act_map_exp" / "trace"),
+        default=default_trace_root,
         help="Top directory that contains variation results.",
+    )
+    parser.add_argument(
+        "--dataset",
+        choices=["r2_a20", "r1_a30"],
+        help="Shortcut for trace root selection.",
     )
     parser.add_argument(
         "--base-ana-cfg",
@@ -23,6 +33,8 @@ def main():
     parser.add_argument("--plt-max-ratio", type=float, default=None)
 
     args = parser.parse_args()
+    if args.dataset:
+        args.top_dir = str(root_dir / "act_map_exp" / f"trace_{args.dataset}")
 
     analyze_script = root_dir / "act_map_exp" / "scripts" / "analyze_pose_errors.py"
     cmd = [
