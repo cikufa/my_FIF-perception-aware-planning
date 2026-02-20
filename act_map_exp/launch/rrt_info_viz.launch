@@ -1,0 +1,106 @@
+<launch>
+  <arg name="traj_file" default="" />
+  <arg name="traj_format" default="auto" />
+  <arg name="map_type" default="auto" />
+  <arg name="map_root" default="$(find act_map_exp)/exp_data/warehouse_FIF" />
+  <arg name="map_suffix" default="r2_a20" />
+  <arg name="map_dir" default="" />
+  <arg name="act_map_params" default="$(find act_map_ros)/params/act_map_warehouse.yaml" />
+  <arg name="gp_vis_dir" default="$(find act_map)/params/fov_approximator_gp/fov45_fs70_lm1000_k15" />
+  <arg name="info_metric_type" default="auto" />
+  <arg name="playback_hz" default="2.0" />
+  <arg name="heatmap_mode" default="visited" />
+  <arg name="heatmap_scale" default="0.6" />
+  <arg name="heatmap_alpha" default="1.0" /> 
+  <arg name="heatmap_stride" default="1" />
+  <arg name="publish_heatmap" default="true" />
+  <arg name="publish_path" default="true" />
+  <arg name="publish_camera" default="true" />
+  <arg name="publish_map_heatmap" default="true" />
+  <arg name="map_heatmap_mode" default="follow" />
+  <arg name="map_heatmap_stride" default="1" />
+  <arg name="map_heatmap_alpha" default="0.03" />
+  <arg name="map_heatmap_vox_scale" default="1.0" />
+  <arg name="map_heatmap_update_every_n" default="1" />
+  <arg name="map_heatmap_visible_only" default="false" />
+  <arg name="map_heatmap_use_z_slice" default="false" />
+  <arg name="map_heatmap_z" default="2.0" />
+  <arg name="map_heatmap_z_tol" default="0.25" />
+  <arg name="manual_mode" default="false" />
+  <arg name="start_paused" default="false" />
+  <arg name="camera_marker_scale" default="2.5" />
+  <arg name="launch_rviz" default="true" />
+  <arg name="rviz_cfg" default="$(find act_map_exp)/rviz_cfgs/rrt_info_viz.rviz" />
+  <arg name="call_generate_mesh" default="false" />
+  <arg name="generate_mesh_service" default="/voxblox_node/generate_mesh" />
+  <arg name="generate_mesh_delay" default="2.0" />
+  <arg name="generate_mesh_wait_timeout" default="30.0" />
+  <arg name="run_setup" default="true" />
+  <arg name="setup_wait_sec" default="2.0" />
+  <arg name="setup_service_wait_timeout" default="30.0" />
+  <arg name="setup_voxblox_load_map" default="false" />
+  <arg name="setup_voxblox_map_file" default="" />
+  <arg name="setup_publish_esdf" default="true" />
+  <arg name="setup_generate_mesh" default="true" />
+  <arg name="setup_load_rrt_maps" default="true" />
+  <arg name="setup_rrt_nodes" default="quad_rrt_gp_info,quad_rrt_gp_trace,quad_rrt_quadratic_info,quad_rrt_quadratic_trace" />
+  <arg name="setup_rrt_map_prefixes" default="gp_info,gp_trace,quad_info,quad_trace" />
+
+  <node name="rrt_info_viz" pkg="act_map_exp" type="rrt_info_viz_node" output="screen" args="-alsologtostderr --v=1">
+    <param name="traj_file" value="$(arg traj_file)" />
+    <param name="traj_format" value="$(arg traj_format)" />
+    <param name="map_type" value="$(arg map_type)" />
+    <param name="map_root" value="$(arg map_root)" />
+    <param name="map_suffix" value="$(arg map_suffix)" />
+    <param name="map_dir" value="$(arg map_dir)" />
+    <param name="act_map_params" value="$(arg act_map_params)" />
+    <param name="gp_vis_dir" value="$(arg gp_vis_dir)" />
+    <param name="info_metric_type" value="$(arg info_metric_type)" />
+    <param name="playback_hz" value="$(arg playback_hz)" />
+    <param name="heatmap_mode" value="$(arg heatmap_mode)" />
+    <param name="heatmap_scale" value="$(arg heatmap_scale)" />
+    <param name="heatmap_alpha" value="$(arg heatmap_alpha)" />
+    <param name="heatmap_stride" value="$(arg heatmap_stride)" />
+    <param name="publish_heatmap" value="$(arg publish_heatmap)" />
+    <param name="publish_path" value="$(arg publish_path)" />
+    <param name="publish_camera" value="$(arg publish_camera)" />
+    <param name="publish_map_heatmap" value="$(arg publish_map_heatmap)" />
+    <param name="map_heatmap_mode" value="$(arg map_heatmap_mode)" />
+    <param name="map_heatmap_stride" value="$(arg map_heatmap_stride)" />
+    <param name="map_heatmap_alpha" value="$(arg map_heatmap_alpha)" />
+    <param name="map_heatmap_vox_scale" value="$(arg map_heatmap_vox_scale)" />
+    <param name="map_heatmap_update_every_n" value="$(arg map_heatmap_update_every_n)" />
+    <param name="map_heatmap_visible_only" value="$(arg map_heatmap_visible_only)" />
+    <param name="map_heatmap_use_z_slice" value="$(arg map_heatmap_use_z_slice)" />
+    <param name="map_heatmap_z" value="$(arg map_heatmap_z)" />
+    <param name="map_heatmap_z_tol" value="$(arg map_heatmap_z_tol)" />
+    <param name="manual_mode" value="$(arg manual_mode)" />
+    <param name="start_paused" value="$(arg start_paused)" />
+    <param name="camera_marker_scale" value="$(arg camera_marker_scale)" />
+  </node>
+
+  <node if="$(arg launch_rviz)" pkg="rviz" type="rviz" name="rrt_info_viz_rviz"
+        args="-d $(arg rviz_cfg)" output="screen" />
+
+  <node if="$(arg call_generate_mesh)" pkg="act_map_exp" type="call_generate_mesh_node"
+        name="call_generate_mesh" output="screen">
+    <param name="service_name" value="$(arg generate_mesh_service)" />
+    <param name="call_delay_sec" value="$(arg generate_mesh_delay)" />
+    <param name="wait_timeout" value="$(arg generate_mesh_wait_timeout)" />
+  </node>
+
+  <node if="$(arg run_setup)" pkg="act_map_exp" type="rrt_info_viz_setup.py"
+        name="rrt_info_viz_setup" output="screen">
+    <param name="wait_sec" value="$(arg setup_wait_sec)" />
+    <param name="service_wait_timeout" value="$(arg setup_service_wait_timeout)" />
+    <param name="voxblox_load_map" value="$(arg setup_voxblox_load_map)" />
+    <param name="voxblox_map_file" value="$(arg setup_voxblox_map_file)" />
+    <param name="publish_esdf" value="$(arg setup_publish_esdf)" />
+    <param name="generate_mesh" value="$(arg setup_generate_mesh)" />
+    <param name="load_rrt_maps" value="$(arg setup_load_rrt_maps)" />
+    <param name="map_root" value="$(arg map_root)" />
+    <param name="map_suffix" value="$(arg map_suffix)" />
+    <param name="rrt_nodes" value="$(arg setup_rrt_nodes)" />
+    <param name="rrt_map_prefixes" value="$(arg setup_rrt_map_prefixes)" />
+  </node>
+</launch>

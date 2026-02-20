@@ -4,12 +4,14 @@ end: [-16.5, 16.5, 2.0]
 start_yaw_deg: 90
 end_yaw_deg: 90
 
+
+
 #use_joint_checker: true
 use_esdf_checker: true
 
 iter_time_sec: 5.0
-max_n_iter: 30
-min_n_iter: 30
+max_n_iter: 70
+min_n_iter: 70
 converge_ratio: 0.005
 viz_every_outer_iter: true
 

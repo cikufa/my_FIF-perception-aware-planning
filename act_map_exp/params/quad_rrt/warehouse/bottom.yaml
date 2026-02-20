@@ -8,8 +8,8 @@ end_yaw_deg: -179
 use_esdf_checker: true
 
 iter_time_sec: 5.0
-max_n_iter: 30
-min_n_iter: 30
+max_n_iter: 70
+min_n_iter: 70
 converge_ratio: 0.005
 viz_every_outer_iter: true
 
