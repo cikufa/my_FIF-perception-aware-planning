@@ -1,0 +1,100 @@
+run_cmd: ""
+along_path: True
+run_cmd_along_path: "./run_fov_opt_rrt_none.sh --both --dataset r1_a30 && python3 run_planner_exp.py /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/warehouse_all.yaml --defaults_yaml /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r1_a30.yaml --along_path --fail_on_error"
+run_cmd_normal: "./run_fov_opt_rrt_none.sh --both --dataset r1_a30 && python3 run_planner_exp.py /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/warehouse_all.yaml --defaults_yaml /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r1_a30.yaml --fail_on_error"
+run_cmd_optimization: "./run_fov_opt_rrt_none.sh --both --dataset r1_a30"
+run_cmd_registration_along_path: "python3 run_planner_exp.py /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/warehouse_all.yaml --defaults_yaml /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r1_a30.yaml --along_path --only_optimized --fail_on_error"
+run_cmd_registration_normal: "python3 run_planner_exp.py /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/warehouse_all.yaml --defaults_yaml /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r1_a30.yaml --only_optimized --fail_on_error"
+max_reg_images_per_trial: 10
+workdir: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/scripts"
+mode: "tune" # "tune" or "fixed"
+error_stat: ""
+pose_errors: ""
+pose_errors_files: []
+error_stat_files: []
+pose_errors_files_along_path:
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/top/top_none/optimized_path_yaw/pose_errors_path_yaw.txt"
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/diagonal/diagonal_none/optimized_path_yaw/pose_errors_path_yaw.txt"
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/bottom/bottom_none/optimized_path_yaw/pose_errors_path_yaw.txt"
+pose_errors_files_normal:
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/top/top_none/optimized/pose_errors.txt"
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/diagonal/diagonal_none/optimized/pose_errors.txt"
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/bottom/bottom_none/optimized/pose_errors.txt"
+error_stat_files_along_path: []
+error_stat_files_normal: []
+stat: "avg"
+n_trials: 200
+timeout: 0
+n_jobs: 1 # If GPU is free enough, run n_jobs > 1 in Optuna.
+study_name: "fov_optuna"
+storage: "sqlite:////home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/optuna.db"
+seed: 0 
+multi_objective: false
+te_weight: 1.0
+re_weight: 1.0
+trial_dir_root: ""
+log_jacobian: 0
+render_width_tune: 480
+render_height_tune: 360
+render_fov_tune: 90.0
+render_sleep_tune: 0.1
+warm_start: false
+warm_start_file: ""
+trial_log: true
+quiet_subprocess: true
+optuna_log_level: "CRITICAL"
+results_jsonl: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/optuna_trials.jsonl"
+results_csv: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/optuna_trials.csv"
+best_params_yaml: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/optuna_best_params.yaml"
+pareto_params_yaml: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30/optuna_pareto_params.yaml"
+enqueue_initial: true
+initial_params:
+  max_iter: 30
+  ks: 15
+  base_step_scale: 1.0
+  min_step_deg: 0.6
+  max_step_deg: 0.6
+  traj_jac_step: 0.5
+  fov_schedule: "180,90,60,15"
+
+tune_max_iter: false
+max_iter_range: [20, 40]
+tune_base_step: true
+base_step_scale_range: [0.5, 5.0]
+base_step_scale_log: false
+tune_min_step_deg: true
+min_step_deg_range: [0.3, 2.0]
+tune_max_step_deg: true
+max_step_deg_range: [0.3, 5.0]
+tune_traj_jac_step: true
+traj_jac_step_range: [0.1, 0.7]
+tune_step_norm_mode: true
+step_norm_mode_options: ["points", "jacobian"]
+tune_fov_schedule: true
+fov_schedule_options:
+  - "180,90,60,15"
+  - "180,90,30,15"
+  - "120,60,15"
+  - "90,45,15"
+  - "180,120,90,60,15"
+
+tune_ks: false
+ks_log: false
+ks_transition_deg_range: [5, 20]
+tune_ks_transition_deg: false
+ks_transition_deg: 10
+# Couple ks to the sampled alpha (or last stage in fov schedule).
+ks_from_visibility: true
+ks_visibility_range_multipliers: [0.8, 1.2]
+
+# Optional fixed parameters for a "best params" YAML.
+# If a key exists here, it overrides tuning for that parameter.
+# fixed_params:
+#   max_iter: 30
+#   ks: 15
+#   base_step_scale: 1.0
+#   min_step_deg: 0.25
+#   max_step_deg: 1.5
+#   traj_jac_step: 0.5
+#   fov_schedule: "180,90,60,30"
+fixed_params: {}

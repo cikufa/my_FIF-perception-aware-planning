@@ -27,6 +27,8 @@ Panels:
         - /rrt_info_camera1/Namespaces1
         - /rrt_info_map_heatmap1
         - /rrt_info_map_heatmap1/Namespaces1
+        - /fov_debug_markers1
+        - /fov_debug_markers1/Namespaces1
       Splitter Ratio: 0.376086950302124
     Tree Height: 594
   - Class: rviz/Selection
@@ -140,6 +142,20 @@ Visualization Manager:
       Namespaces:
         rrt_map_heatmap: true
       Queue Size: 1
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /fov_debug/markers
+      Name: fov_debug_markers
+      Namespaces:
+        fov_debug_arrows: true
+        fov_debug_links: true
+        fov_debug_path: true
+        fov_debug_poses: true
+        fov_debug_status: true
+        fov_debug_text: true
+        fov_debug_vis_pts: true
+      Queue Size: 100
       Value: true
   Enabled: true
   Global Options:

@@ -1,0 +1,25 @@
+<launch>
+  <arg name="quivers" default=""/>
+  <arg name="points" default=""/>
+  <arg name="points_cols" default="0,1,2"/>
+  <arg name="frame" default="world"/>
+  <arg name="topic" default="fov_debug/markers"/>
+  <arg name="rate" default="2.0"/>
+  <arg name="fov_deg" default="90.0"/>
+  <arg name="pose_index" default="-1"/>
+  <arg name="extra_args" default=""/>
+
+  <node pkg="act_map_exp"
+        type="visualize_fov_debug.py"
+        name="fov_debug_viz"
+        output="screen"
+        args="--quivers $(arg quivers)
+              --points $(arg points)
+              --points-cols $(arg points_cols)
+              --frame $(arg frame)
+              --topic $(arg topic)
+              --rate $(arg rate)
+              --fov-deg $(arg fov_deg)
+              --pose-index $(arg pose_index)
+              $(arg extra_args)"/>
+</launch>
