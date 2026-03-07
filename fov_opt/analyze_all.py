@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+try:
+    import yaml  # type: ignore
+except Exception:
+    yaml = None
 
 
 def main():
@@ -36,6 +42,16 @@ def main():
     if args.dataset:
         args.top_dir = str(root_dir / "act_map_exp" / f"trace_{args.dataset}")
 
+    include_views = []
+    warehouse_yaml = root_dir / "act_map_exp" / "params" / "quad_rrt" / "warehouse" / "warehouse_all.yaml"
+    if yaml is None:
+        raise SystemExit("PyYAML is required to read warehouse_all.yaml.")
+    if warehouse_yaml.exists():
+        data = yaml.safe_load(warehouse_yaml.read_text(encoding="utf-8")) or {}
+        base_map = data.get("all_cfg", {}).get("base", {}) if isinstance(data, dict) else {}
+        if isinstance(base_map, dict):
+            include_views = [v for v in base_map.values() if isinstance(v, str)]
+
     analyze_script = root_dir / "act_map_exp" / "scripts" / "analyze_pose_errors.py"
     cmd = [
         "python3",
@@ -45,11 +61,34 @@ def main():
         str(Path(args.base_ana_cfg).resolve()),
         "--multiple",
     ]
+    if include_views:
+        cmd += ["--include", ",".join(include_views)]
     if args.plt_min_ratio is not None:
         cmd += ["--plt_min_ratio", str(args.plt_min_ratio)]
     if args.plt_max_ratio is not None:
         cmd += ["--plt_max_ratio", str(args.plt_max_ratio)]
     subprocess.run(cmd, check=True)
+    _relocate_outputs(Path(args.top_dir).resolve())
+
+
+def _relocate_outputs(top_dir: Path):
+    analysis_dir = top_dir / "analysis_outputs"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    base_cfg = top_dir / "base_analysis_cfg.yaml"
+    if base_cfg.exists():
+        dest = analysis_dir / base_cfg.name
+        if dest.exists():
+            dest.unlink()
+        shutil.move(str(base_cfg), str(dest))
+
+    # Remove duplicate top-level summaries; keep per-mode outputs only.
+    for entry in top_dir.iterdir():
+        if entry.is_file() and entry.name.startswith("overall_"):
+            entry.unlink()
+    # Also drop any root-level duplicates inside analysis_outputs.
+    for entry in analysis_dir.iterdir():
+        if entry.is_file() and entry.name.startswith("overall_"):
+            entry.unlink()
 
 
 if __name__ == "__main__":
