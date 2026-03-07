@@ -10,7 +10,9 @@
     - [Creating the Information Field](#creating-the-information-field)
   - [Run a Single Experiment](#run-a-single-experiment)
   - [Quantitative Evaluation of the Localization Accuracy](#quantitative-evaluation-of-the-localization-accuracy)
-  - [Run Many Experiments for Comparison](#run-many-experiments-for-comparison)
+- [Run Many Experiments for Comparison](#run-many-experiments-for-comparison)
+- [Pose Error Analysis Modes](#pose-error-analysis-modes)
+- [Quiver Metrics Summary](#quiver-metrics-summary)
 
 # Package Overview
 
@@ -116,6 +118,18 @@ rosservice call /quad_traj_opt/play_planned_traj
 
 Now you can change the parameters in the `warehouse_traj_opt_trial.yaml` and run the planning again to see the difference.
 
+# Quiver Metrics Summary
+
+`scripts/summarize_quiver_metrics.py` computes analysis-only metrics from quiver outputs plus a point cloud. It does not modify optimization. For each pose and iteration, it computes `u = Kᵀ c` where `K` is the unit vector from camera position to a point and `c` is the view direction from the quiver.
+
+Metrics written to the CSVs:
+1. `align_mean` = mean(`u`) across all points. Range `[-1, 1]`. Higher means view direction points toward the point distribution.
+2. `align_pos_mean` = mean(`max(u, 0)`) across all points. Range `[0, 1]`. Ignores points behind the camera.
+3. `vis30_count` = count of points with `u >= cos(15°)` (FOV = 30°).
+4. `vis30_score` = sum of `sigmoid(ks * (u - cos(15°)))` with default `ks = 15`.
+
+Outputs are saved next to each optimization result with the `_align` suffix. The script defaults to `points3D.txt` columns `1,2,3`, and you can override the point cloud via `FOV_POINTS3D` if needed.
+
 
 # Implement Your Own Planner: the `PlannerBase` class
 We provide a `PlannerBase` class (in `planner_base.h/cpp`) for specific planners to derive from and to still have a similar workflow.
@@ -186,3 +200,97 @@ Once you have the simulator running (as mentioned at the beginning of this instu
 ## Run Many Experiments for Comparison
 As in our paper, it is often needed to run many planning settings for comparison. We provide convenient setups for this.
 Please see [batch_experiments.md](./batch_experiments.md) for details.
+
+## Pose Error Analysis Modes
+
+This section documents how `scripts/analyze_pose_errors.py` computes the reported metrics and plots in `analysis_outputs/finite`, `analysis_outputs/original`, and `analysis_outputs/penalized`.
+
+**Inputs and preprocessing**
+
+1. Per-variation errors come from `pose_errors.txt` (or `pose_errors_path_yaw.txt` if present).
+2. When loading errors, optional thresholds are applied: any value above `max_trans_e_m` or `max_rot_e_deg` is converted to `NaN`. If these thresholds are unset, no clipping happens.
+3. `NaN` can therefore mean "not registered" or "clipped by threshold".
+
+**Definitions used in all modes**
+
+Let `e = [e_1, ..., e_N]` be the list of errors (translation or rotation). Let `valid = {e_i | e_i is finite}`.
+
+Base stats use:
+
+- `count = |valid|`
+- `nan_count = N - |valid|`
+- `mean = avg(valid)`
+- `median = median(valid)`
+- `p95 = 95th percentile of valid`
+- `max = max(valid)`
+- `rmse = sqrt(avg(valid^2))`
+
+**Mode-specific NaN handling**
+
+All non-finite values are either dropped (finite) or replaced by a penalty value (original/penalized) before computing summary stats and plots.
+
+1. **Finite mode**
+   - Keep only `valid` values; drop `NaN`.
+   - Stats are computed on `valid` only.
+
+2. **Original mode**
+   - Define `plot_max_trans = 1.2 * hist_max_trans_e`.
+   - Define `plot_max_rot = 1.2 * hist_max_rot_e`.
+   - Replace `NaN` with `plot_max_*` before computing stats.
+   - Counts still report the original `count` and `nan_count`.
+
+3. **Penalized mode**
+   - Define `penalty_trans = max_trans_e_m` if finite, else `hist_max_trans_e`.
+   - Define `penalty_rot = max_rot_e_deg` if finite, else `hist_max_rot_e`.
+   - If the fallback penalty is not finite, use `max(valid)` (or `0.0` if `valid` is empty).
+   - Replace `NaN` with `penalty_*` before computing stats.
+   - Counts still report the original `count` and `nan_count`.
+
+**Under-threshold ratios**
+
+These are computed with thresholds `1.0 m` (translation) and `10 deg` (rotation):
+
+- `ratio = under_count / denom`
+- `under_count = number of finite values <= threshold`
+- `denom` depends on mode:
+  - Finite: `denom = |valid|`
+  - Original/Penalized: `denom = N` (includes NaNs)
+
+This means NaNs reduce the ratio in original/penalized, but not in finite.
+
+**Histograms (overall CDF plots)**
+
+The CDF plots use the following values:
+
+- Finite: drop `NaN`.
+- Original: replace `NaN` with `plot_max_*`.
+- Penalized: replace `NaN` with `penalty_*`.
+
+Histogram settings:
+
+- 50 bins
+- `range = [0, plot_max_*]`
+- `density = True`, `cumulative = True`
+- Axis limits are set to `[0, hist_max_*]` (note: `plot_max_*` can be larger than the displayed x-range)
+
+Because of this, penalty-mass at `plot_max_*` may be off-screen if `plot_max_* > hist_max_*`, but it still affects the cumulative distribution.
+
+**Mean ± std bars (overall_mean_std_errors.png)**
+
+- Each bar is the mean error for a variation, computed over **all pose-level errors pooled across all configurations** (e.g., top/diagonal/bottom) for that variation.
+- The error bar is the **standard deviation of those pooled pose errors**, not the std of per-configuration means.
+- In `finite` mode, NaNs are dropped. If only a few valid poses remain or they are tightly clustered, the std can be near zero, so error bars may look invisible.
+- In `original`/`penalized`, NaNs are replaced with a penalty value, which typically increases std and makes the bars more visible.
+
+**Which files use which mode**
+
+Per mode under `analysis_outputs/<mode>/`:
+
+- `overall_mean_std_errors.csv` and `overall_max_errors.csv` use the mode’s NaN handling.
+- `overall_error_stats.csv` is used only in finite mode.
+- `overall_error_stats_penalized.csv` is used in original and penalized modes.
+- Plots (`overall_hist.png`, `overall_max_errors.png`, `overall_mean_std_errors.png`, etc.) follow the same mode-specific handling.
+
+**Raw per-variation summary**
+
+`pose_metrics_summary.csv` and `pose_metrics_summary_penalized.csv` inside each config directory use the raw pose error files (no clipping) and prefer values from `pose_metrics.json` if available. They are not mode-specific.
