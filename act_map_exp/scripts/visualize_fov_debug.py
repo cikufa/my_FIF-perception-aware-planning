@@ -57,7 +57,7 @@ def marker_base(frame: str, ns: str, marker_id: int, marker_type: int) -> Marker
     return marker
 
 
-def parse_quiver_blocks(path: Path) -> np.ndarray:
+def parse_quiver_blocks(path: Path, min_cols: int = 6) -> np.ndarray:
     blocks: List[np.ndarray] = []
     cur: List[List[float]] = []
     with path.open("r", encoding="utf-8") as f:
@@ -69,8 +69,8 @@ def parse_quiver_blocks(path: Path) -> np.ndarray:
                     cur = []
                 continue
             parts = [p for p in line.replace(",", " ").split() if p]
-            if len(parts) >= 6:
-                cur.append([float(v) for v in parts[:6]])
+            if len(parts) >= min_cols:
+                cur.append([float(v) for v in parts[:min_cols]])
     if cur:
         blocks.append(np.asarray(cur, dtype=float))
 
@@ -285,6 +285,10 @@ def parse_args() -> argparse.Namespace:
         description="Animate FoV optimization quivers with visibility/feature debug overlays."
     )
     parser.add_argument("--quivers", required=True, help="Path to quivers file.")
+    parser.add_argument("--metrics", default="",
+                        help="Optional metrics file (x,y,z,dx,dy,dz,vis_count,vis_score).")
+    parser.add_argument("--metrics-mode", choices=["count", "score"], default="count",
+                        help="Use metrics count or score for coloring.")
     parser.add_argument("--points", default="", help="Optional points file (XYZ or COLMAP points3D.txt).")
     parser.add_argument("--points-cols", default="0,1,2",
                         help="Columns for XYZ (0-based), e.g. '1,2,3' for COLMAP points3D.txt.")
@@ -331,10 +335,24 @@ def main() -> None:
     quiver_path = Path(args.quivers).expanduser().resolve()
     if not quiver_path.exists():
         raise FileNotFoundError(f"Quiver file does not exist: {quiver_path}")
-    raw = parse_quiver_blocks(quiver_path)
+    raw = parse_quiver_blocks(quiver_path, min_cols=6)
     pos = raw[:, :, :3]
     dirs = raw[:, :, 3:6]
     n_iter, n_pose, _ = pos.shape
+
+    metrics = None
+    if args.metrics:
+        metrics_path = Path(args.metrics).expanduser().resolve()
+        if not metrics_path.exists():
+            raise FileNotFoundError(f"Metrics file does not exist: {metrics_path}")
+        metrics_raw = parse_quiver_blocks(metrics_path, min_cols=8)
+        if metrics_raw.shape[0] != n_iter or metrics_raw.shape[1] != n_pose:
+            raise ValueError("Metrics file shape does not match quivers file.")
+        # metrics_raw: x,y,z,dx,dy,dz,count,score
+        if args.metrics_mode == "score":
+            metrics = metrics_raw[:, :, 7]
+        else:
+            metrics = metrics_raw[:, :, 6]
 
     points = np.empty((0, 3), dtype=float)
     if args.points:
@@ -384,16 +402,33 @@ def main() -> None:
         iter_id = iter_ids[idx]
         pos_it = pos[iter_id]
         dir_it = dirs[iter_id]
-        counts, vis_idx = compute_visibility(
-            pos_it,
-            dir_it,
-            points,
-            cos_fov,
-            args.min_range,
-            args.max_range,
-            args.use_sigmoid,
-            args.sigmoid_k,
-        )
+        if metrics is None:
+            counts, vis_idx = compute_visibility(
+                pos_it,
+                dir_it,
+                points,
+                cos_fov,
+                args.min_range,
+                args.max_range,
+                args.use_sigmoid,
+                args.sigmoid_k,
+            )
+        else:
+            counts = metrics[iter_id].astype(float)
+            if points.size > 0 and (args.show_links or args.show_visible_points):
+                # recompute visibility only when links/visible points are requested
+                _, vis_idx = compute_visibility(
+                    pos_it,
+                    dir_it,
+                    points,
+                    cos_fov,
+                    args.min_range,
+                    args.max_range,
+                    args.use_sigmoid,
+                    args.sigmoid_k,
+                )
+            else:
+                vis_idx = [np.empty((0,), dtype=int) for _ in range(pos_it.shape[0])]
 
         markers = build_markers(
             frame=args.frame,

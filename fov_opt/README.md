@@ -53,6 +53,16 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
   - Example: `./analyze_all.py --plt-min-ratio 0.2 --plt-max-ratio 1.0`
   - Dataset shortcut: `./analyze_all.py --dataset r2_a20` or `--dataset r1_a30`
   - Override trace root with `--top-dir /path/to/trace_r2_a20`.
+  - Paper figures: each mode folder (`analysis_outputs/finite`, `analysis_outputs/original`,
+    `analysis_outputs/penalized`) now includes `paper_figs/` with publication-ready plots:
+    - `overall_mean_std_errors*.png`: average of TE/RE means for each variation (for quick visual comparison).
+    - `overall_max_errors*.png`: max TE/RE bars with paper labels.
+    - `overall_te_re_avg_norm*.png`: three stacked bar charts (TE mean, RE mean, normalized avg error).
+      The normalized average uses **Option 2**:  
+      `avg_norm = 0.5 * (TE / TE_ref + RE / RE_ref)`  
+      where `TE_ref` and `RE_ref` default to the **no info** baseline (`type=none`) if present,
+      otherwise they fall back to the median of finite means across variations. This yields a unitless
+      composite score that can be compared across methods without mixing meters and degrees directly.
 
 - `analyze.sh` -> shell wrapper for `analyze_all.py`.
   - Example: `./analyze.sh --plt-min-ratio 0.2 --plt-max-ratio 1.0`
