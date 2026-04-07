@@ -15,8 +15,8 @@ opt_type: Ceres
 # trajectory specification
 total_time: 10
 waypoints:
-  - [-4.00, 16.0, 2.0, 0.0]
-  - [-20.00, 50.00, 2.0, 0.0]
+  - [0.00, 53.0, 2.0, 0.0]
+  - [0.50, 21.0, 2.0, 0.0]
 num_segments:
   - 5
 T_BC:
@@ -25,12 +25,9 @@ T_BC:
    0, -1, 0, 0,
    0, 0, 0, 1 ]
 
-ceres_opt_type: Position
-#  Joint
+ceres_opt_type: Joint
 ceres_cost:
   - PosDynamic: 0.01
-  # - YawDynamic: 2.0
+  - YawDynamic: 2.0
   - ESDF: 2e4
-  # - Info: 2.0
-
-save_traj_abs_dir: /home/shekoufeh/FIF_ws/src/rpg_information_field/act_map_exp/trace/quad_traj_opt/warehouse_xyz_only
+  - Info: 2.0

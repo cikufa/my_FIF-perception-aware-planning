@@ -1,14 +1,19 @@
 all:
   base:
+    warehouse_top_base.yaml: warehouse_top
+    warehouse_diagonal_base.yaml: warehouse_diagonal
+    warehouse_bottom_base.yaml: warehouse_bottom
     warehouse_left_base.yaml: warehouse_left
     warehouse_right_base.yaml: warehouse_right
     warehouse_mid_base.yaml: warehouse_mid
     warehouse_side_base.yaml: warehouse_side
+    warehouse_smallU_base.yaml: warehouse_smallU
+    warehouse_bigU_base.yaml: warehouse_bigU
   var:
     - variations/none.yaml
-    #- variations/gp_trace.yaml
+    - variations/gp_trace.yaml
     - variations/gp_det.yaml
     - variations/quad_trace.yaml
-    #- variations/quad_det.yaml
-    #- variations/pc_trace.yaml
-    #- variations/pc_det.yaml
+    - variations/quad_det.yaml
+    - variations/pc_trace.yaml
+    - variations/pc_det.yaml
