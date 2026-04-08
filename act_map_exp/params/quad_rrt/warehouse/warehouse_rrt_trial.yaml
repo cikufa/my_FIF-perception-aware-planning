@@ -20,8 +20,8 @@ use_joint_checker: true
 use_esdf_checker: true
 
 iter_time_sec: 2.0
-max_n_iter: 30
-min_n_iter: 30
+max_n_iter: 100
+min_n_iter: 5
 converge_ratio: 0.005
 viz_every_outer_iter: true
 
