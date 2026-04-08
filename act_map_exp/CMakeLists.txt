@@ -51,6 +51,10 @@ target_link_libraries(quad_rrt_node ${PROJECT_NAME})
 cs_add_executable(rrt_info_viz_node src/rrt_info_viz_node.cpp)
 target_link_libraries(rrt_info_viz_node ${PROJECT_NAME})
 
+# static trajectory comparison visualizer
+cs_add_executable(static_traj_compare_viz_node src/static_traj_compare_viz_node.cpp)
+target_link_libraries(static_traj_compare_viz_node ${PROJECT_NAME})
+
 # mesh generator caller
 cs_add_executable(call_generate_mesh_node src/call_generate_mesh_node.cpp)
 target_link_libraries(call_generate_mesh_node ${PROJECT_NAME})
