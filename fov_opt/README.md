@@ -7,7 +7,7 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
 
 - `optimize.sh` -> calls `act_map_exp/scripts/run_fov_opt_rrt_none.sh`
   - Example: `./optimize.sh --along-path` (default)
-  - Dataset shortcut: `./optimize.sh --both --dataset r2_a20`, `--dataset r1_a30`, or `--dataset both`
+  - Dataset shortcut (RRT only): `./optimize.sh --both --dataset r2_a20`, `--dataset r1_a30`, or `--dataset both`
   - Override trace root directly: `./optimize.sh --both --trace-root /path/to/trace`
   - Use a specific params yaml: `./optimize.sh --along-path --dataset r2_a20 --config /path/to/params.yaml`
     - When `--config` is provided, params are read from that YAML (`fixed_params` -> `initial_params` -> top-level supported keys).
@@ -37,8 +37,7 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
   - `optimized_path_yaw` is the **only** optimized output that is registered.
   - By default, registration uses **all frames** (it injects `--max_reg_images 0`
     unless you pass a `--max_reg_images` override).
-  - Dataset shortcut: `./register.sh --optimized --dataset r2_a20`, `--dataset r1_a30`,
-    or `--dataset both`
+  - Dataset shortcut (RRT only): `./register.sh --optimized --dataset r2_a20`, `--dataset r1_a30`, or `--dataset both`
   - Override defaults yaml directly: `./register.sh --optimized --defaults-yaml /path/to/run_planner_defaults.yaml`
 
 - `tune.sh` -> tuning wrapper for `optuna_fov_tune.py`.
@@ -49,9 +48,10 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
   - Resume: re-running with the same `--n-trials` resumes remaining trials from storage.
   - Override config with `--config /path/to/optuna_fov_tune.yaml`.
 
-- `analyze_all.py` -> analyze all variations under the trace root.
+- `analyze_all.py` -> analyze all variations under the trace root (RRT traces).
   - Example: `./analyze_all.py --plt-min-ratio 0.2 --plt-max-ratio 1.0`
   - Dataset shortcut: `./analyze_all.py --dataset r2_a20` or `--dataset r1_a30`
+  - Optional: `--warehouse-all-yaml` to choose which warehouse yaml supplies `--include` views (default: `quad_rrt/warehouse/warehouse_all.yaml`)
   - Override trace root with `--top-dir /path/to/trace_r2_a20`.
   - Paper figures: each mode folder (`analysis_outputs/finite`, `analysis_outputs/original`,
     `analysis_outputs/penalized`) now includes `paper_figs/` with publication-ready plots:
@@ -63,10 +63,16 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
       where `TE_ref` and `RE_ref` default to the **no info** baseline (`type=none`) if present,
       otherwise they fall back to the median of finite means across variations. This yields a unitless
       composite score that can be compared across methods without mixing meters and degrees directly.
+    - `registration_failure_table*.png`: per-config registration failure rates (NaN ratio in pose errors),
+      with `X` indicating no valid samples for that method in the config.
 
-- `analyze.sh` -> shell wrapper for `analyze_all.py`.
+- `analyze.sh` -> shell wrapper for `analyze_all.py` (RRT).
   - Example: `./analyze.sh --plt-min-ratio 0.2 --plt-max-ratio 1.0`
-  - Only analyzes the trajectory subdirs listed in `warehouse_all.yaml`.
+
+- **Trajectory optimization (separate entrypoints; RRT scripts above are unchanged)**  
+  - `optimize_trajopt.sh` -> forwards to `optimize.sh` with `--trace-root` / `--points3d` for `trace_trajopt_r1_a30/traj_opt_xyz` by default (FoV on xyz-only `*_none`; `--full` uses `traj_opt`).  
+  - `register_trajopt.sh` -> `warehouse_all.yaml` + `run_planner_defaults_reg_variants.yaml` for **`--variants`** (`top_outdir` = `traj_opt`), and `run_planner_defaults_reg_optimized_xyz.yaml` for **`--optimized`** (`optimized_path_yaw` under `traj_opt_xyz`). **`--full`** uses `run_planner_defaults_fov_full.yaml` for both (everything under `traj_opt`).  
+  - `analyze_trajopt.sh` -> default `traj_opt` + `warehouse_all.yaml`; add **`--xyz`** for `traj_opt_xyz` + `warehouse_all_xyz_only.yaml` (FoV outputs). Uses `quad_traj_opt/base_analysis_cfg.yaml` when present.
 
 - `act_map_exp/scripts/visualize_quiver_progress.py` -> RViz animation of FoV
   optimization iterations from `quivers*.txt`.
@@ -161,6 +167,12 @@ r1_a30:
 `/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r1_a30`
 `/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r1_a30.yaml`
 
+Trajectory optimization (params under `act_map_exp/params/quad_traj_opt/warehouse/`):
+
+- **`traj_opt`**: full planned trajectories (all info variants) — used for **`register_trajopt.sh --variants`** (`run_planner_defaults_reg_variants.yaml`).
+- **`traj_opt_xyz`**: xyz-only `none` runs — used **only** as FoV optimization input (`optimize_trajopt.sh` default) and for **`register_trajopt.sh --optimized`** (`run_planner_defaults_reg_optimized_xyz.yaml`).
+- **`--full`** on `optimize_trajopt.sh` / `register_trajopt.sh`: single tree `traj_opt` + `run_planner_defaults_fov_full.yaml`.
+
 ## Typical Runs
 
 r2_a20:
@@ -176,6 +188,40 @@ r1_a30:
 both:
 `./optimize.sh --along-path --dataset both`
 `./register.sh --all --dataset both`
+
+Trajectory optimization — use **`optimize_trajopt.sh` / `register_trajopt.sh` / `analyze_trajopt.sh`** (RRT scripts stay separate).
+
+Recommended order: **`--variants`** uses **`traj_opt`**; **`optimize_trajopt.sh`** uses **`traj_opt_xyz`** `*_none`; **`--optimized`** registers **`traj_opt_xyz`** `optimized_path_yaw`.
+
+`./register_trajopt.sh --variants`
+
+`./optimize_trajopt.sh --along-path`
+
+`./register_trajopt.sh --optimized`
+
+`./analyze_trajopt.sh`
+
+`./analyze_trajopt.sh --xyz`
+
+`./register_trajopt.sh --all` runs variants then optimized with the correct defaults each time.
+
+Full single-tree pipeline (`traj_opt` only): add **`--full`** to **`optimize_trajopt.sh`** and **`register_trajopt.sh`** (see `run_planner_defaults_fov_full.yaml`). Env overrides: **`FOV_TRAJOPT_REG_DEFAULTS_VARIANTS`**, **`FOV_TRAJOPT_REG_DEFAULTS_OPTIMIZED`**, **`FOV_TRAJOPT_REG_DEFAULTS`** (with `--full`).
+
+### End-to-end pipeline (traj opt + FoV + UE + TE/RE)
+
+1. **Planning (outside these scripts)** saves stamped poses under e.g. `.../warehouse_top/warehouse_top_none/` (`stamped_Twc.txt`, UE convention files, etc.).
+
+2. **`optimize_trajopt.sh` / `optimize.sh --trace-root ...`** runs `manifold_test_trajectory` on each `*_none` folder: warm-starts from **yaw along path** (`along_path/stamped_Twc_path_yaw.txt`, generated from positions when missing), refines **camera rotations** for FoV/visibility, writes `optimized_path_yaw/` (e.g. `stamped_Twc_path_yaw.txt`, `stamped_Twc_ue_path_yaw.txt`, quivers).
+
+3. **`register_trajopt.sh`** calls `run_planner_exp.py`, which for each variation:
+   - Builds **along_path** from `stamped_Twc.txt` via `generate_path_yaw.py` (path-aligned yaw + UE pose files).
+   - **Renders** images in Unreal via `colmap_scripts/my_render_ue.py` using `stamped_Twc_ue_path_yaw.txt` (or optimized `*_path_yaw` / `optimized_stamped_Twc_ue_path_yaw.txt` where applicable).
+   - **Registers** images to COLMAP (`register_images_to_model.py`).
+   - **Computes TE/RE** (`calculate_pose_errors.py`).
+
+4. So for the **along_path** baseline you get: stamped poses → yaw along path → UE render → registration → TE/RE. For **`optimized_path_yaw`**, the same render/register/eval steps use the **FoV-optimized** rotations instead of the initial path yaw.
+
+5. **`analyze_trajopt.sh`** runs `analyze_pose_errors.py` (default **`traj_opt`**; **`--xyz`** for **`traj_opt_xyz`** FoV outputs).
 
 ## Notes
 
