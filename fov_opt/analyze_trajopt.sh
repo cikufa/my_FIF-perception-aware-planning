@@ -13,17 +13,17 @@ base_to="${root_dir}/act_map_exp/params/quad_traj_opt/base_analysis_cfg.yaml"
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [--xyz] [--full] [analyze_all.py args...]
+Usage: $(basename "$0") [--xyz] [--full] [--no-merge] [analyze_all.py args...]
 
-  Default: --top-dir traj_opt + warehouse_all.yaml (variant registration results).
-  --xyz:    traj_opt_xyz + warehouse_all_xyz_only.yaml (FoV-optimized outputs under xyz none folders).
-  --full:   same as default here (traj_opt + warehouse_all); use if you only run the --full register pipeline.
+  Default: traj_opt + warehouse_all.yaml, and pulls optimized_path_yaw TE/RE from
+            traj_opt_xyz (same warehouse_* names). FoV outputs live only under xyz.
 
-Run twice (default then --xyz) to refresh plots for both trees.
+  --xyz:       analyze traj_opt_xyz only (no merge; none + optimized there).
+  --full:      traj_opt only, single-tree pipeline; disables merge (same as --no-merge).
+  --no-merge:  do not pass --merge-optimized-from (e.g. custom top_dir layout).
 
-Further args are passed to analyze_all.py (e.g. --plt-min-ratio 0.2).
-
-Env: FOV_TRAJOPT_TOP_DIR, FOV_TRAJOPT_WAREHOUSE_YAML, FOV_TRAJOPT_BASE_ANA_CFG override defaults.
+Env: FOV_TRAJOPT_TOP_DIR, FOV_TRAJOPT_WAREHOUSE_YAML, FOV_TRAJOPT_BASE_ANA_CFG,
+     FOV_TRAJOPT_MERGE_OPTIMIZED_FROM (default: traj_opt_xyz), FOV_TRAJOPT_NO_MERGE_OPTIMIZED=1
 USAGE
 }
 
@@ -43,16 +43,25 @@ if [[ -z "${base_ana}" ]]; then
   fi
 fi
 
+use_xyz_only=false
+no_merge=false
+
 while [[ $# -gt 0 ]]; do
   case "${1:-}" in
     --xyz)
       top_dir="${FOV_TRAJOPT_TOP_DIR:-${trace_xyz}}"
       wh_yaml="${FOV_TRAJOPT_WAREHOUSE_YAML:-${wh_xyz}}"
+      use_xyz_only=true
       shift
       ;;
     --full)
       top_dir="${FOV_TRAJOPT_TOP_DIR:-${trace_full}}"
       wh_yaml="${FOV_TRAJOPT_WAREHOUSE_YAML:-${wh_full}}"
+      no_merge=true
+      shift
+      ;;
+    --no-merge)
+      no_merge=true
       shift
       ;;
     *)
@@ -61,8 +70,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+merge_arg=()
+if [[ "${FOV_TRAJOPT_NO_MERGE_OPTIMIZED:-}" == "1" ]]; then
+  no_merge=true
+fi
+if [[ "${use_xyz_only}" == "false" && "${no_merge}" == "false" ]]; then
+  merge_from="${FOV_TRAJOPT_MERGE_OPTIMIZED_FROM:-${trace_xyz}}"
+  merge_arg=(--merge-optimized-from "${merge_from}")
+fi
+
 exec python3 "${analyzer}" \
   --top-dir "${top_dir}" \
   --warehouse-all-yaml "${wh_yaml}" \
   --base-ana-cfg "${base_ana}" \
+  "${merge_arg[@]}" \
   "$@"

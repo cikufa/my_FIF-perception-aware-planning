@@ -26,6 +26,7 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
   - `--summarize` emits additional per-pose CSVs under
     `<view>_none/optimized_path_yaw/quiver_analysis`, including
     `*_pose_metrics_progress_full.csv` when debug logs are available.
+  - After `analyze_pose_errors.py --multiple`, **`analysis_outputs/finite/`** includes **`pipeline_runtime*.tex`**, **`.txt`**, and **`.csv`** (and the same under **`fov_optimization_runtime*`**): **rows** = method variants (No Info., GP/Quad/PC, **Ours**); **columns** = mean traj-opt time (s) from `ceres_summary.yaml` as `custom_solve_time - custom_logger_time` (same as `analyze_traj_opt.py` / Table V–style Ceres timing), averaged over analyzed trajectories under `top_dir` for Fisher variants, and mean Ceres time for the xyz-only `*_none` run on **`--merge_optimized_from`** (or `top_dir` if unset) for **Ours**; second column is **FoV** manifold time (mean of `optimization_time_sec.txt` under `*_none/optimized_path_yaw/`) **for Ours only**, **0** for other rows.
 
 - `register.sh` -> registration wrapper for `run_planner_exp.py`.
   - Variants always include along_path baseline (it generates along_path poses):  
@@ -72,7 +73,7 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
 - **Trajectory optimization (separate entrypoints; RRT scripts above are unchanged)**  
   - `optimize_trajopt.sh` -> forwards to `optimize.sh` with `--trace-root` / `--points3d` for `trace_trajopt_r1_a30/traj_opt_xyz` by default (FoV on xyz-only `*_none`; `--full` uses `traj_opt`).  
   - `register_trajopt.sh` -> `warehouse_all.yaml` + `run_planner_defaults_reg_variants.yaml` for **`--variants`** (`top_outdir` = `traj_opt`), and `run_planner_defaults_reg_optimized_xyz.yaml` for **`--optimized`** (`optimized_path_yaw` under `traj_opt_xyz`). **`--full`** uses `run_planner_defaults_fov_full.yaml` for both (everything under `traj_opt`).  
-  - `analyze_trajopt.sh` -> default `traj_opt` + `warehouse_all.yaml`; add **`--xyz`** for `traj_opt_xyz` + `warehouse_all_xyz_only.yaml` (FoV outputs). Uses `quad_traj_opt/base_analysis_cfg.yaml` when present.
+  - `analyze_trajopt.sh` -> default `traj_opt` + `warehouse_all.yaml`, and **`--merge-optimized-from traj_opt_xyz`** so **`optimized_path_yaw`** appears in plots (FoV registration lives under xyz). **`--xyz`** analyzes xyz only (no merge). **`--no-merge`** / **`register_trajopt.sh --full`**-style single tree: use `--full` or `--no-merge`. Uses `quad_traj_opt/base_analysis_cfg.yaml` when present.
 
 - `act_map_exp/scripts/visualize_quiver_progress.py` -> RViz animation of FoV
   optimization iterations from `quivers*.txt`.
@@ -170,7 +171,7 @@ r1_a30:
 Trajectory optimization (params under `act_map_exp/params/quad_traj_opt/warehouse/`):
 
 - **`traj_opt`**: full planned trajectories (all info variants) — used for **`register_trajopt.sh --variants`** (`run_planner_defaults_reg_variants.yaml`).
-- **`traj_opt_xyz`**: xyz-only `none` runs — used **only** as FoV optimization input (`optimize_trajopt.sh` default) and for **`register_trajopt.sh --optimized`** (`run_planner_defaults_reg_optimized_xyz.yaml`).
+- **`traj_opt_xyz`**: xyz-only **`none`** baselines only (no gp/quad/pc variants on disk) — FoV input (`optimize_trajopt.sh` default) and **`register_trajopt.sh --optimized`**. Reflected in `warehouse_all_xyz_only.yaml` (single `variations/none.yaml` entry).
 - **`--full`** on `optimize_trajopt.sh` / `register_trajopt.sh`: single tree `traj_opt` + `run_planner_defaults_fov_full.yaml`.
 
 ## Typical Runs
@@ -199,9 +200,9 @@ Recommended order: **`--variants`** uses **`traj_opt`**; **`optimize_trajopt.sh`
 
 `./register_trajopt.sh --optimized`
 
-`./analyze_trajopt.sh`
+`./analyze_trajopt.sh` — variants from **`traj_opt`**, optimized series merged from **`traj_opt_xyz`**.
 
-`./analyze_trajopt.sh --xyz`
+`./analyze_trajopt.sh --xyz` — xyz tree only (none + optimized there).
 
 `./register_trajopt.sh --all` runs variants then optimized with the correct defaults each time.
 
@@ -221,7 +222,14 @@ Full single-tree pipeline (`traj_opt` only): add **`--full`** to **`optimize_tra
 
 4. So for the **along_path** baseline you get: stamped poses → yaw along path → UE render → registration → TE/RE. For **`optimized_path_yaw`**, the same render/register/eval steps use the **FoV-optimized** rotations instead of the initial path yaw.
 
-5. **`analyze_trajopt.sh`** runs `analyze_pose_errors.py` (default **`traj_opt`**; **`--xyz`** for **`traj_opt_xyz`** FoV outputs).
+5. **`analyze_trajopt.sh`** runs `analyze_pose_errors.py` on **`traj_opt`** and merges **`optimized_path_yaw`** pose errors from **`traj_opt_xyz`** (`analyze_pose_errors.py --merge_optimized_from`). Use **`--xyz`** to analyze only the xyz tree; **`--no-merge`** if optimized lives under **`traj_opt`** (`register_trajopt.sh --full`).
+
+### Traj opt vs RRT: frames, formats, and NaNs in `pose_errors.txt`
+
+- **Planner outputs** use the same convention as RRT: `stamped_Twc.txt` / `stamped_Twc_ue.txt` from `PlannerBase` (`quad_traj_opt_impl.h` / `quad_rrt_impl.h`), same `TwcToUEPose`, same `T_BC` pattern in base YAMLs. Traj-opt maps use names like `warehouse_left` instead of `left`; registration must use **`warehouse_base_model_r1_a30/warehouse_left_none_sparse`** (etc.), not the short-name sparse dirs, but the **pipeline is the same** `run_planner_exp.py` path as RRT.
+- **NaNs in `pose_errors.txt`** (from `calculate_pose_errors.py`) mean that image **did not end up in the COLMAP sparse model** after `register_images_to_model.py` (path mismatch or **too few inliers**). It is **not** a silent frame mix-up: matching uses `rel_path` from `warehouse_*_none_sparse/../images` to the render folder, consistent with how models were built.
+- **Extra NaNs in analysis** can come from `analyze_pose_errors.py` when TE/RE exceed `max_trans_e_m` / `max_rot_e_deg` in `analysis_cfg.yaml` (treated as invalid for “finite” stats).
+- **Why more NaNs than RRT on disk**: traj-opt often has **denser time sampling** (`integral_cost_sample_dt`, many more poses per run), so more frames are hard for SIFT/COLMAP; try lowering `--min_num_inliers`, checking `registration_stats*.csv`, or subsampling with `run_planner_exp.py --max_reg_images`.
 
 ## Notes
 
