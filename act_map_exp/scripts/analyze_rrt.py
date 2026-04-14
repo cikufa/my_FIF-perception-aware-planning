@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
 import os
 import shutil
@@ -9,7 +9,14 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rc
-from analyze_pose_errors import _loadPoseError
+from analyze_pose_errors import (
+    _loadPoseError,
+    EXCLUDE_OPTIMIZED,
+    _filter_cfg_for_optimized,
+    _is_optimized_name,
+)
+
+from wandb_utils import add_wandb_args, safe_init, log_images, log_metrics, finish
 
 
 rc('font', **{'serif': ['Cardo'], 'size': 20})
@@ -23,7 +30,25 @@ kMinOutIter = -1
 kSecPerOutIter = 5.0
 
 
-def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None):
+def _collectSubdirs(cfg_dir):
+    subdir_map = {}
+    for name in sorted(os.listdir(cfg_dir)):
+        if name == "optimized":
+            continue
+        path = os.path.join(cfg_dir, name)
+        if os.path.isdir(path):
+            subdir_map[name] = path
+    for name, path in list(subdir_map.items()):
+        along_path_dir = os.path.join(path, 'along_path')
+        if os.path.isdir(along_path_dir):
+            along_name = name + '_along_path'
+            if along_name not in subdir_map:
+                subdir_map[along_name] = along_path_dir
+    return subdir_map
+
+
+def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
+                     wandb_mod=None, wandb_prefix=""):
     print(Fore.RED + "==== process configuration {} ====".format(cfg_dir))
     analysis_cfg_fn = os.path.join(cfg_dir, 'analysis_cfg.yaml')
     assert os.path.exists(analysis_cfg_fn), analysis_cfg_fn
@@ -33,13 +58,30 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None):
     if base_cfg:
         ana_cfg.update(base_cfg)
         print("Effective analysis configuration {}".format(ana_cfg))
+    _filter_cfg_for_optimized(ana_cfg)
 
+    subdir_map = _collectSubdirs(cfg_dir)
     if 'ordered_subdir_nms' in ana_cfg:
         subdir_nms = ana_cfg['ordered_subdir_nms']
     else:
-        subdir_nms = sorted([v for v in os.listdir(cfg_dir)
-                             if os.path.isdir(os.path.join(cfg_dir, v))])
-    subdirs = [os.path.join(cfg_dir, v) for v in subdir_nms]
+        subdir_nms = sorted(subdir_map.keys())
+    if EXCLUDE_OPTIMIZED and subdir_nms:
+        subdir_nms = [v for v in subdir_nms if not _is_optimized_name(v)]
+    subdirs = [subdir_map.get(v, os.path.join(cfg_dir, v)) for v in subdir_nms]
+    valid_subdir_nms = []
+    valid_subdirs = []
+    for nm, sd in zip(subdir_nms, subdirs):
+        rrt_stats_fn = os.path.join(sd, rrt_stats_nm)
+        if not os.path.exists(rrt_stats_fn):
+            print(Fore.YELLOW + "Skip {} (missing {}).".format(sd, rrt_stats_nm))
+            continue
+        valid_subdir_nms.append(nm)
+        valid_subdirs.append(sd)
+    subdir_nms = valid_subdir_nms
+    subdirs = valid_subdirs
+    if not subdir_nms:
+        print(Fore.YELLOW + "No RRT stats found under {}; skipping.".format(cfg_dir))
+        return {}, []
     print("Going to analyze variations {}".format(subdir_nms))
 
     has_exact_solution = []
@@ -55,7 +97,6 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None):
     for idx, sd in enumerate(subdirs):
         print("- Process {}...".format(sd))
         rrt_stats_fn_i = os.path.join(sd, rrt_stats_nm)
-        assert os.path.exists(rrt_stats_fn_i)
         rrt_stats_i = np.loadtxt(rrt_stats_fn_i)
         assert rrt_stats_i.shape[1] == 5
         nm_i = subdir_nms[idx]
@@ -115,8 +156,21 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None):
     print('saving error plots...')
     plt.legend(ncol=2, fontsize='small')
     fig.tight_layout()
-    fig.savefig(os.path.join(cfg_dir, 'vert_edge_comp.png'),
-                bbox_inches='tight', dpi=300)
+    vert_edge_fn = os.path.join(cfg_dir, 'vert_edge_comp.png')
+    fig.savefig(vert_edge_fn, bbox_inches='tight', dpi=300)
+
+    if wandb_mod is not None:
+        prefix = wandb_prefix.rstrip('/')
+        if prefix:
+            prefix = prefix + '/'
+        metrics = {}
+        for type_key, fail_rate in type_to_fail_rate.items():
+            metrics["{}fail_rate/{}".format(prefix, type_key)] = fail_rate
+        if no_solution_types:
+            metrics["{}no_solution_types".format(prefix)] = ",".join(no_solution_types)
+            metrics["{}no_solution_count".format(prefix)] = len(no_solution_types)
+        log_metrics(wandb_mod, metrics)
+        log_images(wandb_mod, {prefix + 'vert_edge_comp': vert_edge_fn})
 
     return type_to_fail_rate, no_solution_types
 
@@ -129,6 +183,7 @@ if __name__ == '__main__':
                         help='base analysis configuration')
     parser.add_argument('--multiple', action='store_true', dest='multiple',
                         help='how to treat the top_dir')
+    add_wandb_args(parser)
     parser.set_defaults(multiple=False)
     args = parser.parse_args()
 
@@ -139,6 +194,13 @@ if __name__ == '__main__':
     with open(args.base_ana_cfg) as f:
         base_ana_cfg = yaml.load(f)
     print("Base configuration for analysis is {}".format(base_ana_cfg))
+
+    run_name = os.path.basename(os.path.abspath(args.top_dir))
+    run, wandb_mod = safe_init(
+        args,
+        config={'top_dir': args.top_dir, 'base_ana_cfg': args.base_ana_cfg,
+                'multiple': args.multiple},
+        run_name=run_name)
 
     if args.multiple:
         cfg_nms = [v for v in sorted(os.listdir(args.top_dir))
@@ -153,8 +215,9 @@ if __name__ == '__main__':
         all_no_solution_types = []
         for idx, cfg_d_i in enumerate(cfg_dirs):
             cfg_nm_i = cfg_nms[idx]
+            cfg_key = os.path.basename(cfg_d_i.rstrip(os.sep))
             type_to_fail_rate_i, no_solution_types_i = analyzeSingleCfg(
-                cfg_d_i, base_cfg=base_ana_cfg)
+                cfg_d_i, base_cfg=base_ana_cfg, wandb_mod=wandb_mod, wandb_prefix=cfg_key)
             all_types_i = sorted(list(type_to_fail_rate_i.keys()))
             if not all_types:
                 all_types = all_types_i
@@ -176,4 +239,6 @@ if __name__ == '__main__':
                     f.write(" ")
                 f.write('\n')
     else:
-        analyzeSingleCfg(args.top_dir, base_ana_cfg)
+        analyzeSingleCfg(args.top_dir, base_ana_cfg, wandb_mod=wandb_mod)
+
+    finish(run)

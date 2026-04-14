@@ -48,6 +48,34 @@ def run_subprocess(cmd_tokens):
         return subprocess.call(cmd_tokens, stdout=devnull, stderr=devnull)
 
 
+def _ensure_along_path_output(input_dir, output_dir, gen_path_yaw_sc, allow_generate=True):
+    if os.path.exists(os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt')):
+        return True
+    if not allow_generate:
+        return False
+    if not gen_path_yaw_sc or not os.path.exists(gen_path_yaw_sc):
+        log(Fore.YELLOW + "Missing generate_path_yaw.py: {}".format(gen_path_yaw_sc))
+        return False
+    twc_in = os.path.join(input_dir, 'stamped_Twc.txt')
+    if not os.path.exists(twc_in):
+        log(Fore.YELLOW + "Missing stamped_Twc.txt for along_path: {}".format(twc_in))
+        return False
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    cmd = ["python3", gen_path_yaw_sc, "--input_dir", input_dir, "--output_dir", output_dir]
+    log(Fore.BLUE + " ".join(cmd))
+    ret = run_subprocess(cmd)
+    if ret != 0:
+        log(Fore.RED + "generate_path_yaw failed for {} (exit code {}).".format(output_dir, ret))
+        return False
+    return os.path.exists(os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt'))
+
+
+def _copy_if_exists(src, dst):
+    if os.path.exists(src) and not os.path.exists(dst):
+        shutil.copy2(src, dst)
+
+
 def _parseConfig(cfg_fn):
     assert os.path.exists(cfg_fn)
     assert cfg_fn.endswith('.yaml')
@@ -159,6 +187,35 @@ def _limit_registration_lists(rel_image_list, rel_cam_list, max_reg_images):
     return (n, len(img_sel))
 
 
+def _limit_pose_list(pose_list_path, max_poses, out_dir):
+    if max_poses is None or max_poses <= 0:
+        return pose_list_path, None
+    if not os.path.exists(pose_list_path):
+        return pose_list_path, None
+
+    with open(pose_list_path, 'r') as f:
+        lines = [ln for ln in f.readlines() if ln.strip() and not ln.startswith('#')]
+
+    n = len(lines)
+    if n == 0:
+        return pose_list_path, (0, 0)
+    if n <= max_poses:
+        return pose_list_path, (n, n)
+
+    if max_poses == 1:
+        idx = [0]
+    else:
+        idx = [(i * (n - 1)) // (max_poses - 1) for i in range(max_poses)]
+
+    subset = [lines[i] for i in idx]
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, 'render_poses_subset.txt')
+    with open(out_path, 'w') as f:
+        f.writelines(subset)
+    return out_path, (n, len(subset))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('config_yaml', type=str, help='yaml')
@@ -185,10 +242,11 @@ if __name__ == '__main__':
     parser.add_argument('--skip_reg', action='store_true', dest='skip_reg')
     parser.add_argument('--skip_eval', action='store_true', dest='skip_eval')
     parser.add_argument('--only_optimized', action='store_true',
-                        help='when set, run steps only for variation '
-                             "type 'optimized'")
+                        help='when set, run steps only for optimized_path_yaw outputs')
+    parser.add_argument('--only_along_path', action='store_true',
+                        help='run only along_path baseline from base none (no variations or optimized)')
     parser.add_argument('--skip_optimized', action='store_true',
-                        help='skip variations with type optimized (including optimized_path_yaw)')
+                        help='skip variations with type optimized_path_yaw')
     parser.add_argument('--optimized_dir', type=str, default=None,
                         help='path to the optimized folder to use when '
                              '--only_optimized is set')
@@ -213,6 +271,8 @@ if __name__ == '__main__':
     parser.add_argument('--exp_nm_rm_sufix', type=str, default='_base')
     parser.add_argument('--along_path', action='store_true',
                         help='use stamped_Twc_ue_path_yaw and path_yaw output names')
+    parser.add_argument('--no_generate_along_path', action='store_true',
+                        help='do not generate along_path poses; require them to exist already')
     parser.add_argument('--verbose', action='store_true',
                         help='enable verbose logging')
     parser.add_argument('--show_subprocess', action='store_true',
@@ -226,7 +286,7 @@ if __name__ == '__main__':
 
     # parser.set_defaults(clear_output=True, skip_plan=True, skip_render=False, skip_reg=False,
     #                     skip_eval=False)
-    parser.set_defaults(clear_output=False, skip_plan=False, skip_render=False, skip_reg=False,
+    parser.set_defaults(clear_output=False, skip_plan=True, skip_render=False, skip_reg=False,
                         skip_eval=False)
     args = parser.parse_args()
     VERBOSE = bool(args.verbose)
@@ -253,17 +313,18 @@ if __name__ == '__main__':
                 args.optimized_dirs = [opt_from_defaults]
     if not args.top_outdir:
         parser.error("--top_outdir is required (or set it in --defaults_yaml)")
-    needs_colmap = not (args.skip_render and args.skip_reg and args.skip_eval)
-    needs_base_model = not (args.skip_reg and args.skip_eval)
-    if needs_colmap and not args.colmap_script_dir:
+    if not args.colmap_script_dir:
         parser.error("--colmap_script_dir is required (or set it in --defaults_yaml)")
-    if needs_base_model and not args.base_model:
+    if not args.base_model:
         parser.error("--base_model is required (or set it in --defaults_yaml)")
     opt_named, opt_list = _parse_optimized_dir_specs(args.optimized_dirs)
     if args.optimized_dir:
         if opt_named or opt_list:
             parser.error("Use either --optimized_dir or --optimized_dirs")
         opt_list = [args.optimized_dir]
+
+    if args.only_along_path and args.only_optimized:
+        parser.error("--only_along_path and --only_optimized are mutually exclusive")
 
     opt_only = args.only_optimized and (opt_named or opt_list)
     if args.only_optimized and not opt_only:
@@ -275,26 +336,20 @@ if __name__ == '__main__':
     #     print(Fore.YELLOW + "Not clearing stuff due to skipping steps.") 
     #     args.clear_output = False
 
-    if needs_colmap:
-        assert os.path.exists(args.colmap_script_dir)
-        ren_list_sc = os.path.join(args.colmap_script_dir, 'my_render_ue.py')
-        assert os.path.exists(ren_list_sc)
-        gen_list_sc = os.path.join(args.colmap_script_dir, 'generate_img_rel_path.py')
-        assert os.path.exists(gen_list_sc)
-        reg_sc = os.path.join(args.colmap_script_dir, 'register_images_to_model.py')
-        assert os.path.exists(reg_sc)
-        cal_e_sc = os.path.join(args.colmap_script_dir, 'calculate_pose_errors.py')
-        assert os.path.exists(cal_e_sc)
-    else:
-        ren_list_sc = None
-        gen_list_sc = None
-        reg_sc = None
-        cal_e_sc = None
-
-    if needs_base_model:
-        assert os.path.exists(args.base_model)
-        base_img_dir = os.path.join(args.base_model, 'images')
-        assert os.path.exists(base_img_dir)
+    assert os.path.exists(args.colmap_script_dir)
+    ren_list_sc = os.path.join(args.colmap_script_dir, 'my_render_ue.py')
+    assert os.path.exists(ren_list_sc)
+    gen_list_sc = os.path.join(args.colmap_script_dir, 'generate_img_rel_path.py')
+    assert os.path.exists(gen_list_sc)
+    reg_sc = os.path.join(args.colmap_script_dir, 'register_images_to_model.py')
+    assert os.path.exists(reg_sc)
+    cal_e_sc = os.path.join(args.colmap_script_dir, 'calculate_pose_errors.py')
+    assert os.path.exists(cal_e_sc)
+    assert os.path.exists(args.base_model)
+    base_img_dir = os.path.join(args.base_model, 'images')
+    assert os.path.exists(base_img_dir)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    gen_path_yaw_sc = os.path.join(script_dir, 'generate_path_yaw.py')
 
     all_base_fns, all_base_names, all_var_fns = _parseConfig(args.config_yaml)
 
@@ -312,7 +367,6 @@ if __name__ == '__main__':
     for base_fns, base_names, var_fns in zip(all_base_fns, all_base_names, all_var_fns):
         log(Fore.YELLOW + "Processing group: base {} with var. {}".format(base_fns, var_fns))
         failed_cfgs = []
-        base_contexts = []
         for base_idx, base_f_i in enumerate(base_fns):
             log(Fore.RED + "==============================")
             log(Fore.RED + "===== Running base {}... =====".format(base_f_i))
@@ -347,39 +401,41 @@ if __name__ == '__main__':
 
             def _append_opt_entries(opt_dir):
                 abs_opt_dir = os.path.abspath(opt_dir)
-                added = False
-                if os.path.exists(abs_opt_dir):
-                    var_entries.append({
-                        'name': 'optimized',
-                        'type': 'optimized',
-                        'outdir': abs_opt_dir,
-                        'cfg_fn': None,
-                        'path_yaw': False
-                    })
-                    added = True
+                if abs_opt_dir.endswith("_path_yaw"):
+                    abs_opt_path_yaw = abs_opt_dir
                 else:
-                    log(Fore.RED + "Optimized directory does not exist: {}".format(abs_opt_dir))
-                    failed_cfgs.append(base_f_i + '-optimized-missing')
-
-                if args.along_path:
                     abs_opt_path_yaw = abs_opt_dir.rstrip(os.sep) + "_path_yaw"
-                    if os.path.exists(abs_opt_path_yaw):
-                        var_entries.append({
-                            'name': 'optimized_path_yaw',
-                            'type': 'optimized_path_yaw',
-                            'outdir': abs_opt_path_yaw,
-                            'cfg_fn': None,
-                            'path_yaw': True
-                        })
-                        added = True
-                    else:
-                        log(Fore.RED + "Optimized path-yaw directory does not exist: {}".format(
-                            abs_opt_path_yaw))
-                        failed_cfgs.append(base_f_i + '-optimized-path-yaw-missing')
+                if os.path.exists(abs_opt_path_yaw):
+                    var_entries.append({
+                        'name': 'optimized_path_yaw',
+                        'type': 'optimized_path_yaw',
+                        'outdir': abs_opt_path_yaw,
+                        'cfg_fn': None,
+                        'path_yaw': True
+                    })
+                    return True
+                log(Fore.RED + "Optimized path-yaw directory does not exist: {}".format(
+                    abs_opt_path_yaw))
+                failed_cfgs.append(base_f_i + '-optimized-path-yaw-missing')
+                return False
 
-                return added
-
-            if opt_only:
+            if args.only_along_path:
+                base_none_dir = os.path.abspath(os.path.join(
+                    base_outdir_i, "{}_none".format(exp_nm)))
+                if os.path.isdir(base_none_dir):
+                    var_entries.append({
+                        'special': 'along_path',
+                        'base_none_dir': base_none_dir,
+                        'outdir': os.path.join(base_none_dir, 'along_path'),
+                        'name': "{}_none_along_path".format(exp_nm),
+                        'type': 'along_path',
+                        'path_yaw': True,
+                    })
+                else:
+                    log(Fore.YELLOW + "Missing base none folder for along_path: {}".format(
+                        base_none_dir))
+                    failed_cfgs.append(base_f_i + '-along-path-missing')
+            elif opt_only:
                 if args.skip_optimized:
                     log(Fore.YELLOW + "Skip optimized entries (skip_optimized set).")
                     continue
@@ -397,295 +453,301 @@ if __name__ == '__main__':
                         'outdir': None,  # to be filled
                         'path_yaw': False
                     })
-                if (not args.skip_optimized) and args.along_path and (opt_named or opt_list):
+                if (not args.skip_optimized) and (opt_named or opt_list):
                     opt_dir = _resolve_opt_dir(exp_nm, base_idx, base_names)
                     if opt_dir is not None:
                         _append_opt_entries(opt_dir)
+                if args.skip_optimized and args.along_path:
+                    base_none_dir = os.path.abspath(os.path.join(
+                        base_outdir_i, "{}_none".format(exp_nm)))
+                    if os.path.isdir(base_none_dir):
+                        var_entries.append({
+                            'special': 'along_path',
+                            'base_none_dir': base_none_dir,
+                            'outdir': os.path.join(base_none_dir, 'along_path'),
+                            'name': "{}_none_along_path".format(exp_nm),
+                            'type': 'along_path',
+                            'path_yaw': True,
+                        })
+                    else:
+                        log(Fore.YELLOW + "Missing base none folder for along_path: {}".format(
+                            base_none_dir))
+                        failed_cfgs.append(base_f_i + '-along-path-missing')
 
-            base_contexts.append({
-                'base_idx': base_idx,
-                'base_f_i': base_f_i,
-                'exp_nm': exp_nm,
-                'base_outdir_i': base_outdir_i,
-                'base_params': base_params,
-                'var_entries': var_entries,
-                'var_by_cfg': {e['cfg_fn']: e for e in var_entries if e.get('cfg_fn')},
-                'var_dir_to_types': var_dir_to_types,
-                'base_total': len(var_entries),
-                'progress': 0,
-            })
-
-        def _run_var_entry(base_ctx, var_entry):
-            base_ctx['progress'] += 1
-            var_idx = base_ctx['progress']
-            base_total = base_ctx['base_total']
-            base_f_i = base_ctx['base_f_i']
-            exp_nm = base_ctx['exp_nm']
-            base_outdir_i = base_ctx['base_outdir_i']
-            base_params = base_ctx['base_params']
-            var_dir_to_types = base_ctx['var_dir_to_types']
-
-            if var_entry.get('cfg_fn') is None:
-                log(Fore.RED + "===== Running optimized folder {}... =====".format(var_entry['outdir']))
-                if var_entry['name'] == 'optimized':
-                    var_nm_i = exp_nm + '_optimized'
-                else:
+            base_total = len(var_entries)
+            for var_idx, var_entry in enumerate(var_entries, start=1):
+                if var_entry.get('special') == 'along_path':
+                    log(Fore.RED + "===== Running along_path from none... =====")
+                    var_nm_i = var_entry['name']
+                    base_none_dir = var_entry['base_none_dir']
+                    input_dir_i = var_entry['outdir']
+                    outdir_i = input_dir_i
+                    var_type = var_entry.get('type', 'along_path')
+                    entry_path_yaw = True
+                    fail_label = base_f_i + '-along-path'
+                elif var_entry.get('cfg_fn') is None:
+                    log(Fore.RED + "===== Running optimized folder {}... =====".format(var_entry['outdir']))
                     var_nm_i = exp_nm + '_' + var_entry['name']
-                input_dir_i = var_entry['outdir']
-                outdir_i = input_dir_i
-                var_type = var_entry.get('type', 'optimized')
-                entry_path_yaw = var_entry.get('path_yaw', False)
-                fail_label = base_f_i + '-optimized'
-            else:
-                var_f_i = var_entry['cfg_fn']
-                log(Fore.RED + "===== Running variation {}... =====".format(var_f_i))
-                with open(var_f_i) as fvar:
-                    var_opts_i = yaml.load(fvar, Loader=yaml.FullLoader)
-                if args.only_optimized and var_opts_i.get('type') != 'optimized':
-                    log(Fore.BLUE + "> Skip variation (only_optimized set).")
-                    return
-                if args.skip_optimized and var_opts_i.get('type') in ('optimized', 'optimized_path_yaw'):
-                    log(Fore.BLUE + "> Skip variation (skip_optimized set).")
-                    return
-                var_nm_i = exp_nm + '_' + var_opts_i['type']
-                outdir_i = os.path.abspath(os.path.join(base_outdir_i, var_nm_i))
-                input_dir_i = outdir_i
-                var_type = var_opts_i['type']
-                entry_path_yaw = var_entry.get('path_yaw', False)
-                if args.clear_output and os.path.exists(outdir_i):
-                    shutil.rmtree(outdir_i)
-                    log(Fore.RED + "Removed {}".format(outdir_i))
-                fail_label = base_f_i + '-' + var_f_i
-            log("- output: {}".format(outdir_i))
-            if input_dir_i != outdir_i:
-                log("- input:  {}".format(input_dir_i))
-            var_dir_to_types[var_nm_i] = var_type
-            progress_bar(var_idx, base_total, "{}:{} init".format(exp_nm, var_nm_i))
-#________________________________________________________________________________________________________________
-
-            print(Fore.YELLOW + "Step 1: plan and save")
-            if args.skip_plan:
-                print(Fore.BLUE + "> Skip planner")
-            elif var_entry.get('cfg_fn') is None:
-                print(Fore.BLUE + "> Skip planner (optimized entry)")
-            else:
-                cfg_i = os.path.join(outdir_i, var_nm_i + ".yaml")
-                params_i = base_params.copy()
-                params_i.update(var_opts_i)
-                params_i['save_traj_abs_dir'] = outdir_i
-                params_i['save_abs_dir'] = outdir_i
-                if not os.path.exists(outdir_i):
-                    os.makedirs(outdir_i)
-                with open(cfg_i, 'w') as f:
-                    yaml.dump(params_i, f, default_flow_style=False)
-                print("- cfg: {}".format(cfg_i))
-                set_planner_cmd = ("""rosservice call /{}/set_planner_state"""
-                                   """ "config: '{}'" """.format(var_opts_i['node'], cfg_i))
-                print(Fore.BLUE + set_planner_cmd)
-                subprocess.call(shlex.split(set_planner_cmd))
-                call_planner_cmd = "rosservice call /{}/plan_vis_save".format(var_opts_i['node'])
-                print(Fore.BLUE + call_planner_cmd)
-                subprocess.call(shlex.split(call_planner_cmd))
-
-                reset_planner_cmd = "rosservice call /{}/reset_planner".format(var_opts_i['node'])
-                print(Fore.BLUE + reset_planner_cmd)
-                subprocess.call(shlex.split(reset_planner_cmd))
-
-           
-            
-#________________________________________________________________________________________________________________
-
-            path_suffix = '_path_yaw' if entry_path_yaw else ''
-            progress_bar(var_idx, base_total, "{}:{} render".format(exp_nm, var_nm_i))
-            render_dir_i = os.path.join(outdir_i, 'rendering')
-            if not args.skip_render:
-                ue_pose_candidates = [
-                    os.path.join(input_dir_i, 'stamped_Twc_ue{}.txt'.format(path_suffix)),
-                    os.path.join(input_dir_i, 'optimized_stamped_Twc_ue{}.txt'.format(path_suffix)),
-                ]
-                ue_pose_fn = None
-                for candidate in ue_pose_candidates:
-                    if os.path.exists(candidate):
-                        ue_pose_fn = candidate
-                        break
-
-                if ue_pose_fn is None:
-                    failed_cfgs.append(fail_label)
-                    log(Fore.RED + "Cannot find UE poses (checked: {}). CONTINUE TO NEXT.".format(
-                        ", ".join(ue_pose_candidates)))
-                    return
-                if not os.path.exists(outdir_i):
-                    os.makedirs(outdir_i)
-
-                render_cmd =  "{} {} --save_dir {}".format(
-                    ren_list_sc, ue_pose_fn, render_dir_i)
-                if args.render_width is not None:
-                    render_cmd += " --width {}".format(args.render_width)
-                if args.render_height is not None:
-                    render_cmd += " --height {}".format(args.render_height)
-                if args.render_fov is not None:
-                    render_cmd += " --fov {}".format(args.render_fov)
-                if args.render_sleep is not None:
-                    render_cmd += " --sleep {}".format(args.render_sleep)
-             
-                # render_cmd = ("rosrun unrealcv_bridge render_from_poses.py {} --save_dir {}"
-                #               " --save_sleep_sec 0.1 --unrealcv_in {}").format(
-                #                   ue_pose_fn, render_dir_i, args.unrealcv_ini)
-
-                log(Fore.BLUE + render_cmd)
-                render_ret = run_subprocess(shlex.split(render_cmd))
-                if render_ret != 0:
-                    failed_cfgs.append(fail_label + '-render-failed')
-                    log(Fore.RED + "Rendering failed for {} (exit code {}).".format(
-                        outdir_i, render_ret))
-                    return
-            else:
-                log(Fore.BLUE + "> Skip rendering.")
-
-            reg_name = var_nm_i
-            if path_suffix and not reg_name.endswith(path_suffix):
-                reg_name = reg_name + path_suffix
-            progress_bar(var_idx, base_total, "{}:{} register".format(exp_nm, var_nm_i))
-            reg_img_dir_i = os.path.join(render_dir_i, 'images')
-            reg_img_nm_to_cam = os.path.join(render_dir_i, 'img_nm_to_colmap_cam.txt')
-            reg_missing = []
-            if not os.path.isdir(render_dir_i):
-                reg_missing.append(render_dir_i)
-            if not os.path.isdir(reg_img_dir_i):
-                reg_missing.append(reg_img_dir_i)
-            elif not _dir_has_images(reg_img_dir_i):
-                reg_missing.append(reg_img_dir_i + " (no images)")
-            if not os.path.exists(reg_img_nm_to_cam):
-                reg_missing.append(reg_img_nm_to_cam)
-            if not args.skip_reg:
-                if reg_missing:
-                    log(Fore.YELLOW + "Skip registration for {} (missing: {}).".format(
-                        outdir_i, ", ".join(reg_missing)))
-                    failed_cfgs.append(fail_label + '-reg-missing')
-                    log(Fore.BLUE + "> Skip image registration.")
-                    reg_success = False
+                    input_dir_i = var_entry['outdir']
+                    outdir_i = input_dir_i
+                    var_type = var_entry.get('type', 'optimized_path_yaw')
+                    entry_path_yaw = var_entry.get('path_yaw', False)
+                    fail_label = base_f_i + '-optimized'
                 else:
-                    gen_list_cmd = "{} --base_dir {} --img_dir {} --img_nm_to_cam_list {}".format(
-                        gen_list_sc, base_img_dir, reg_img_dir_i,
-                        reg_img_nm_to_cam)
-                    log(Fore.BLUE + gen_list_cmd)
-                    gen_ret = run_subprocess(shlex.split(gen_list_cmd))
-                    if gen_ret != 0:
-                        log(Fore.RED + "generate_img_rel_path failed for {} (exit code {}).".format(
-                            outdir_i, gen_ret))
-                        failed_cfgs.append(fail_label + '-gen-list-failed')
-                        return
-                    rel_image_list = os.path.join(render_dir_i, 'images/rel_img_path.txt')
-                    rel_cam_list = os.path.join(render_dir_i, 'images/rel_img_nm_to_cam_list.txt')
-                    if not os.path.exists(rel_image_list) or not os.path.exists(rel_cam_list):
-                        log(Fore.YELLOW + "Skip registration for {} (missing: {}{}).".format(
-                            outdir_i,
-                            rel_image_list if not os.path.exists(rel_image_list) else "",
-                            ", " + rel_cam_list if not os.path.exists(rel_cam_list) else ""))
+                    var_f_i = var_entry['cfg_fn']
+                    log(Fore.RED + "===== Running variation {}... =====".format(var_f_i))
+                    with open(var_f_i) as fvar:
+                        var_opts_i = yaml.load(fvar, Loader=yaml.FullLoader)
+                    if args.only_optimized and var_opts_i.get('type') != 'optimized_path_yaw':
+                        log(Fore.BLUE + "> Skip variation (only_optimized set).")
+                        continue
+                    if args.skip_optimized and var_opts_i.get('type') in ('optimized_path_yaw',):
+                        log(Fore.BLUE + "> Skip variation (skip_optimized set).")
+                        continue
+                    var_nm_i = exp_nm + '_' + var_opts_i['type']
+                    outdir_i = os.path.abspath(os.path.join(base_outdir_i, var_nm_i))
+                    input_dir_i = outdir_i
+                    var_type = var_opts_i['type']
+                    entry_path_yaw = var_entry.get('path_yaw', False)
+                    fail_label = base_f_i + '-' + var_f_i
+                    if args.clear_output and os.path.exists(outdir_i):
+                        shutil.rmtree(outdir_i)
+                        log(Fore.RED + "Removed {}".format(outdir_i))
+                log("- output: {}".format(outdir_i))
+                if input_dir_i != outdir_i:
+                    log("- input:  {}".format(input_dir_i))
+                var_dir_to_types[var_nm_i] = var_type
+                progress_bar(var_idx, base_total, "{}:{} init".format(exp_nm, var_nm_i))
+                if var_entry.get('special') == 'along_path':
+                    if not os.path.isdir(base_none_dir):
+                        failed_cfgs.append(fail_label + '-missing-none')
+                        log(Fore.RED + "Missing base none dir for along_path: {}".format(
+                            base_none_dir))
+                        continue
+                    allow_generate = (not args.no_generate_along_path) and var_entry.get('generate', True)
+                    if not _ensure_along_path_output(base_none_dir, outdir_i, gen_path_yaw_sc, allow_generate):
+                        failed_cfgs.append(fail_label + '-path-yaw')
+                        if args.no_generate_along_path:
+                            log(Fore.RED + "along_path poses missing (generation disabled): {}".format(outdir_i))
+                        continue
+                    _copy_if_exists(os.path.join(base_none_dir, 'rrt_stats.txt'),
+                                    os.path.join(outdir_i, 'rrt_stats.txt'))
+                    _copy_if_exists(os.path.join(base_none_dir, 'rrt_plan_time_sec.txt'),
+                                    os.path.join(outdir_i, 'rrt_plan_time_sec.txt'))
+#________________________________________________________________________________________________________________
+
+                # print(Fore.YELLOW + "Step 1: plan and save")
+                # if not args.skip_plan:
+                #     cfg_i = os.path.join(outdir_i, var_nm_i+".yaml")
+                #     params_i = base_params.copy()
+                #     params_i.update(var_opts_i)
+                #     params_i['save_traj_abs_dir'] = outdir_i
+                #     params_i['save_abs_dir'] = outdir_i
+                #     with open(cfg_i, 'w') as f:
+                #         yaml.dump(params_i, f, default_flow_style=False)
+                #     print("- cfg: {}".format(cfg_i))
+                #     set_planner_cmd = ("""rosservice call /{}/set_planner_state"""
+                #                        """ "config: '{}'" """.format(var_opts_i['node'], cfg_i))
+                #     print(Fore.BLUE + set_planner_cmd)
+                #     subprocess.call(shlex.split(set_planner_cmd))
+                #     call_planner_cmd = "rosservice call /{}/plan_vis_save".format(var_opts_i['node'])
+                #     print(Fore.BLUE + call_planner_cmd)
+                #     subprocess.call(shlex.split(call_planner_cmd))
+
+                #     reset_planner_cmd = "rosservice call /{}/reset_planner".format(var_opts_i['node'])
+                #     print(Fore.BLUE + reset_planner_cmd)
+                #     subprocess.call(shlex.split(reset_planner_cmd))
+                # else:
+                #     print(Fore.BLUE + "> Skip planner")
+
+               
+                
+#________________________________________________________________________________________________________________
+
+                path_suffix = '_path_yaw' if entry_path_yaw else ''
+                progress_bar(var_idx, base_total, "{}:{} render".format(exp_nm, var_nm_i))
+                render_dir_i = os.path.join(outdir_i, 'rendering')
+                if not args.skip_render:
+                    ue_pose_candidates = [
+                        os.path.join(input_dir_i, 'stamped_Twc_ue{}.txt'.format(path_suffix)),
+                        os.path.join(input_dir_i, 'optimized_stamped_Twc_ue{}.txt'.format(path_suffix)),
+                    ]
+                    ue_pose_fn = None
+                    for candidate in ue_pose_candidates:
+                        if os.path.exists(candidate):
+                            ue_pose_fn = candidate
+                            break
+
+                    if ue_pose_fn is None:
+                        failed_cfgs.append(fail_label)
+                        log(Fore.RED + "Cannot find UE poses (checked: {}). CONTINUE TO NEXT.".format(
+                            ", ".join(ue_pose_candidates)))
+                        continue
+                    if not os.path.exists(outdir_i):
+                        os.makedirs(outdir_i)
+
+                    ue_pose_use = ue_pose_fn
+                    if args.max_reg_images > 0:
+                        ue_pose_use, limit_info = _limit_pose_list(
+                            ue_pose_fn, args.max_reg_images, render_dir_i)
+                        if limit_info is not None:
+                            n_before, n_after = limit_info
+                            if n_before > n_after:
+                                log(Fore.BLUE + "Limit render poses: {} -> {}".format(
+                                    n_before, n_after))
+
+                    render_cmd =  "{} {} --save_dir {}".format(
+                        ren_list_sc, ue_pose_use, render_dir_i)
+                    if args.render_width is not None:
+                        render_cmd += " --width {}".format(args.render_width)
+                    if args.render_height is not None:
+                        render_cmd += " --height {}".format(args.render_height)
+                    if args.render_fov is not None:
+                        render_cmd += " --fov {}".format(args.render_fov)
+                    if args.render_sleep is not None:
+                        render_cmd += " --sleep {}".format(args.render_sleep)
+                 
+                    # render_cmd = ("rosrun unrealcv_bridge render_from_poses.py {} --save_dir {}"
+                    #               " --save_sleep_sec 0.1 --unrealcv_in {}").format(
+                    #                   ue_pose_fn, render_dir_i, args.unrealcv_ini)
+
+                    log(Fore.BLUE + render_cmd)
+                    render_ret = run_subprocess(shlex.split(render_cmd))
+                    if render_ret != 0:
+                        failed_cfgs.append(fail_label + '-render-failed')
+                        log(Fore.RED + "Rendering failed for {} (exit code {}).".format(
+                            outdir_i, render_ret))
+                        continue
+                else:
+                    log(Fore.BLUE + "> Skip rendering.")
+
+                reg_name = var_nm_i
+                if path_suffix and not reg_name.endswith(path_suffix):
+                    reg_name = reg_name + path_suffix
+                progress_bar(var_idx, base_total, "{}:{} register".format(exp_nm, var_nm_i))
+                reg_img_dir_i = os.path.join(render_dir_i, 'images')
+                reg_img_nm_to_cam = os.path.join(render_dir_i, 'img_nm_to_colmap_cam.txt')
+                reg_missing = []
+                if not os.path.isdir(render_dir_i):
+                    reg_missing.append(render_dir_i)
+                if not os.path.isdir(reg_img_dir_i):
+                    reg_missing.append(reg_img_dir_i)
+                elif not _dir_has_images(reg_img_dir_i):
+                    reg_missing.append(reg_img_dir_i + " (no images)")
+                if not os.path.exists(reg_img_nm_to_cam):
+                    reg_missing.append(reg_img_nm_to_cam)
+                if not args.skip_reg:
+                    if reg_missing:
+                        log(Fore.YELLOW + "Skip registration for {} (missing: {}).".format(
+                            outdir_i, ", ".join(reg_missing)))
                         failed_cfgs.append(fail_label + '-reg-missing')
                         log(Fore.BLUE + "> Skip image registration.")
                         reg_success = False
                     else:
-                        if args.max_reg_images > 0:
-                            limit_info = _limit_registration_lists(
-                                rel_image_list, rel_cam_list, args.max_reg_images)
-                            if limit_info is not None:
-                                n_before, n_after = limit_info
-                                if n_before > n_after:
-                                    log(Fore.BLUE + "Limit registration images: {} -> {}".format(
-                                        n_before, n_after))
-                        reg_cmd = ("{} {} --reg_name {} --reg_list_fn {} "
-                                   "--img_nm_to_colmap_cam_list {} --upref_no_time "
-                                   "--min_num_inliers {}").format(
-                                       reg_sc, args.base_model, reg_name, rel_image_list, rel_cam_list,
-                                       args.min_num_inliers)
-                        log(Fore.BLUE + reg_cmd)
-                        reg_ret = run_subprocess(shlex.split(reg_cmd))
-                        if reg_ret != 0:
-                            log(Fore.RED + "Registration failed for {} (exit code {}).".format(
-                                outdir_i, reg_ret))
-                            failed_cfgs.append(fail_label + '-reg-failed')
-                            reg_success = False
-                            return
-                        reg_success = True
-            else:
-                log(Fore.BLUE + "> Skip image registration.")
-                reg_success = False
-
-            progress_bar(var_idx, base_total, "{}:{} eval".format(exp_nm, var_nm_i))
-            if not args.skip_eval:
-                reg_model_dir_i = os.path.join(args.base_model, reg_name+"_sparse")
-                eval_missing = []
-                if not os.path.exists(reg_model_dir_i):
-                    eval_missing.append(reg_model_dir_i)
-                reg_img_name_to_colmap = os.path.join(render_dir_i, 'img_name_to_colmap_Tcw.txt')
-                if not os.path.exists(reg_img_name_to_colmap):
-                    eval_missing.append(reg_img_name_to_colmap)
-                if not os.path.isdir(reg_img_dir_i):
-                    eval_missing.append(reg_img_dir_i)
-                elif not _dir_has_images(reg_img_dir_i):
-                    eval_missing.append(reg_img_dir_i + " (no images)")
-                if eval_missing:
-                    log(Fore.YELLOW + "Skip evaluation for {} (missing: {}).".format(
-                        outdir_i, ", ".join(eval_missing)))
-                    failed_cfgs.append(fail_label + '-eval-missing')
-                    return
-                eval_outdir_i = outdir_i
-                if entry_path_yaw:
-                    eval_outdir_i = os.path.join(outdir_i, 'eval{}'.format(path_suffix))
-                    if not os.path.exists(eval_outdir_i):
-                        os.makedirs(eval_outdir_i)
-                eval_cmd = ("{} --reg_model_dir {} --reg_img_name_to_colmap_Tcw {}"
-                            " --reg_img_dir {} --output_path {}"
-                            " --acc_trans_thresh {} --acc_rot_thresh {}").format(
-                                cal_e_sc, reg_model_dir_i,
-                                reg_img_name_to_colmap,
-                                reg_img_dir_i, eval_outdir_i,
-                                args.max_trans_e_m, args.max_rot_e_deg)
-                log(Fore.BLUE + eval_cmd)
-                eval_ret = run_subprocess(shlex.split(eval_cmd))
-                if eval_ret != 0:
-                    log(Fore.RED + "Pose error evaluation failed for {} (exit code {}).".format(
-                        outdir_i, eval_ret))
-                    failed_cfgs.append(fail_label + '-eval-failed')
-                    return
-                if entry_path_yaw:
-                    for fn in ['pose_errors.txt', 'registered_poses_ue.txt']:
-                        src_fn = os.path.join(eval_outdir_i, fn)
-                        if not os.path.exists(src_fn):
+                        gen_list_cmd = "{} --base_dir {} --img_dir {} --img_nm_to_cam_list {}".format(
+                            gen_list_sc, base_img_dir, reg_img_dir_i,
+                            reg_img_nm_to_cam)
+                        log(Fore.BLUE + gen_list_cmd)
+                        gen_ret = run_subprocess(shlex.split(gen_list_cmd))
+                        if gen_ret != 0:
+                            log(Fore.RED + "generate_img_rel_path failed for {} (exit code {}).".format(
+                                outdir_i, gen_ret))
+                            failed_cfgs.append(fail_label + '-gen-list-failed')
                             continue
-                        base_nm, ext = os.path.splitext(fn)
-                        dst_fn = os.path.join(outdir_i, base_nm + path_suffix + ext)
-                        if os.path.exists(dst_fn):
-                            os.remove(dst_fn)
-                        shutil.move(src_fn, dst_fn)
-                    if os.path.exists(eval_outdir_i) and not os.listdir(eval_outdir_i):
-                        os.rmdir(eval_outdir_i)
-            else:
-                log(Fore.BLUE + "> Skip evaluation.")
-            progress_bar(var_idx, base_total, "{}:{} done".format(exp_nm, var_nm_i))
-            if var_idx == base_total:
-                progress_done()
+                        rel_image_list = os.path.join(render_dir_i, 'images/rel_img_path.txt')
+                        rel_cam_list = os.path.join(render_dir_i, 'images/rel_img_nm_to_cam_list.txt')
+                        if not os.path.exists(rel_image_list) or not os.path.exists(rel_cam_list):
+                            log(Fore.YELLOW + "Skip registration for {} (missing: {}{}).".format(
+                                outdir_i,
+                                rel_image_list if not os.path.exists(rel_image_list) else "",
+                                ", " + rel_cam_list if not os.path.exists(rel_cam_list) else ""))
+                            failed_cfgs.append(fail_label + '-reg-missing')
+                            log(Fore.BLUE + "> Skip image registration.")
+                            reg_success = False
+                        else:
+                            if args.max_reg_images > 0:
+                                limit_info = _limit_registration_lists(
+                                    rel_image_list, rel_cam_list, args.max_reg_images)
+                                if limit_info is not None:
+                                    n_before, n_after = limit_info
+                                    if n_before > n_after:
+                                        log(Fore.BLUE + "Limit registration images: {} -> {}".format(
+                                            n_before, n_after))
+                            reg_cmd = ("{} {} --reg_name {} --reg_list_fn {} "
+                                       "--img_nm_to_colmap_cam_list {} --upref_no_time "
+                                       "--min_num_inliers {}").format(
+                                           reg_sc, args.base_model, reg_name, rel_image_list, rel_cam_list,
+                                           args.min_num_inliers)
+                            log(Fore.BLUE + reg_cmd)
+                            reg_ret = run_subprocess(shlex.split(reg_cmd))
+                            if reg_ret != 0:
+                                log(Fore.RED + "Registration failed for {} (exit code {}).".format(
+                                    outdir_i, reg_ret))
+                                failed_cfgs.append(fail_label + '-reg-failed')
+                                reg_success = False
+                                continue
+                            reg_success = True
+                else:
+                    log(Fore.BLUE + "> Skip image registration.")
+                    reg_success = False
 
-        if opt_only:
-            for base_ctx in base_contexts:
-                for var_entry in base_ctx['var_entries']:
-                    _run_var_entry(base_ctx, var_entry)
-        else:
-            for var_f_i in var_fns:
-                for base_ctx in base_contexts:
-                    var_entry = base_ctx['var_by_cfg'].get(var_f_i)
-                    if var_entry is None:
+                progress_bar(var_idx, base_total, "{}:{} eval".format(exp_nm, var_nm_i))
+                if not args.skip_eval:
+                    reg_model_dir_i = os.path.join(args.base_model, reg_name+"_sparse")
+                    eval_missing = []
+                    if not os.path.exists(reg_model_dir_i):
+                        eval_missing.append(reg_model_dir_i)
+                    reg_img_name_to_colmap = os.path.join(render_dir_i, 'img_name_to_colmap_Tcw.txt')
+                    if not os.path.exists(reg_img_name_to_colmap):
+                        eval_missing.append(reg_img_name_to_colmap)
+                    if not os.path.isdir(reg_img_dir_i):
+                        eval_missing.append(reg_img_dir_i)
+                    elif not _dir_has_images(reg_img_dir_i):
+                        eval_missing.append(reg_img_dir_i + " (no images)")
+                    if eval_missing:
+                        log(Fore.YELLOW + "Skip evaluation for {} (missing: {}).".format(
+                            outdir_i, ", ".join(eval_missing)))
+                        failed_cfgs.append(fail_label + '-eval-missing')
                         continue
-                    _run_var_entry(base_ctx, var_entry)
-            for base_ctx in base_contexts:
-                for var_entry in base_ctx['var_entries']:
-                    if var_entry.get('cfg_fn') is None:
-                        _run_var_entry(base_ctx, var_entry)
-
-        for base_ctx in base_contexts:
-            with open(os.path.join(base_ctx['base_outdir_i'], 'analysis_cfg.yaml'), 'w') as f:
-                yaml.dump({'types': base_ctx['var_dir_to_types'],
+                    eval_outdir_i = outdir_i
+                    if entry_path_yaw:
+                        eval_outdir_i = os.path.join(outdir_i, 'eval{}'.format(path_suffix))
+                        if not os.path.exists(eval_outdir_i):
+                            os.makedirs(eval_outdir_i)
+                    eval_cmd = ("{} --reg_model_dir {} --reg_img_name_to_colmap_Tcw {}"
+                                " --reg_img_dir {} --output_path {}"
+                                " --acc_trans_thresh {} --acc_rot_thresh {}").format(
+                                    cal_e_sc, reg_model_dir_i,
+                                    reg_img_name_to_colmap,
+                                    reg_img_dir_i, eval_outdir_i,
+                                    args.max_trans_e_m, args.max_rot_e_deg)
+                    log(Fore.BLUE + eval_cmd)
+                    eval_ret = run_subprocess(shlex.split(eval_cmd))
+                    if eval_ret != 0:
+                        log(Fore.RED + "Pose error evaluation failed for {} (exit code {}).".format(
+                            outdir_i, eval_ret))
+                        failed_cfgs.append(fail_label + '-eval-failed')
+                        continue
+                    if entry_path_yaw:
+                        for fn in ['pose_errors.txt', 'registered_poses_ue.txt']:
+                            src_fn = os.path.join(eval_outdir_i, fn)
+                            if not os.path.exists(src_fn):
+                                continue
+                            # For path-yaw runs, keep standard filenames since the folder name
+                            # already encodes the variation.
+                            dst_fn = os.path.join(outdir_i, fn)
+                            if os.path.exists(dst_fn):
+                                os.remove(dst_fn)
+                            shutil.move(src_fn, dst_fn)
+                        if os.path.exists(eval_outdir_i) and not os.listdir(eval_outdir_i):
+                            os.rmdir(eval_outdir_i)
+                else:
+                    log(Fore.BLUE + "> Skip evaluation.")
+                progress_bar(var_idx, base_total, "{}:{} done".format(exp_nm, var_nm_i))
+                if var_idx == base_total:
+                    progress_done()
+            with open(os.path.join(base_outdir_i, 'analysis_cfg.yaml'), 'w') as f:
+                yaml.dump({'types': var_dir_to_types,
                            'max_trans_e_m': args.max_trans_e_m,
                            'max_rot_e_deg': args.max_rot_e_deg}, f, default_flow_style=False)
 
