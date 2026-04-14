@@ -48,9 +48,11 @@ def run_subprocess(cmd_tokens):
         return subprocess.call(cmd_tokens, stdout=devnull, stderr=devnull)
 
 
-def _ensure_along_path_output(input_dir, output_dir, gen_path_yaw_sc):
+def _ensure_along_path_output(input_dir, output_dir, gen_path_yaw_sc, allow_generate=True):
     if os.path.exists(os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt')):
         return True
+    if not allow_generate:
+        return False
     if not gen_path_yaw_sc or not os.path.exists(gen_path_yaw_sc):
         log(Fore.YELLOW + "Missing generate_path_yaw.py: {}".format(gen_path_yaw_sc))
         return False
@@ -185,6 +187,35 @@ def _limit_registration_lists(rel_image_list, rel_cam_list, max_reg_images):
     return (n, len(img_sel))
 
 
+def _limit_pose_list(pose_list_path, max_poses, out_dir):
+    if max_poses is None or max_poses <= 0:
+        return pose_list_path, None
+    if not os.path.exists(pose_list_path):
+        return pose_list_path, None
+
+    with open(pose_list_path, 'r') as f:
+        lines = [ln for ln in f.readlines() if ln.strip() and not ln.startswith('#')]
+
+    n = len(lines)
+    if n == 0:
+        return pose_list_path, (0, 0)
+    if n <= max_poses:
+        return pose_list_path, (n, n)
+
+    if max_poses == 1:
+        idx = [0]
+    else:
+        idx = [(i * (n - 1)) // (max_poses - 1) for i in range(max_poses)]
+
+    subset = [lines[i] for i in idx]
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, 'render_poses_subset.txt')
+    with open(out_path, 'w') as f:
+        f.writelines(subset)
+    return out_path, (n, len(subset))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('config_yaml', type=str, help='yaml')
@@ -211,10 +242,11 @@ if __name__ == '__main__':
     parser.add_argument('--skip_reg', action='store_true', dest='skip_reg')
     parser.add_argument('--skip_eval', action='store_true', dest='skip_eval')
     parser.add_argument('--only_optimized', action='store_true',
-                        help='when set, run steps only for variation '
-                             "type 'optimized'")
+                        help='when set, run steps only for optimized_path_yaw outputs')
+    parser.add_argument('--only_along_path', action='store_true',
+                        help='run only along_path baseline from base none (no variations or optimized)')
     parser.add_argument('--skip_optimized', action='store_true',
-                        help='skip variations with type optimized (including optimized_path_yaw)')
+                        help='skip variations with type optimized_path_yaw')
     parser.add_argument('--optimized_dir', type=str, default=None,
                         help='path to the optimized folder to use when '
                              '--only_optimized is set')
@@ -239,6 +271,8 @@ if __name__ == '__main__':
     parser.add_argument('--exp_nm_rm_sufix', type=str, default='_base')
     parser.add_argument('--along_path', action='store_true',
                         help='use stamped_Twc_ue_path_yaw and path_yaw output names')
+    parser.add_argument('--no_generate_along_path', action='store_true',
+                        help='do not generate along_path poses; require them to exist already')
     parser.add_argument('--verbose', action='store_true',
                         help='enable verbose logging')
     parser.add_argument('--show_subprocess', action='store_true',
@@ -288,6 +322,9 @@ if __name__ == '__main__':
         if opt_named or opt_list:
             parser.error("Use either --optimized_dir or --optimized_dirs")
         opt_list = [args.optimized_dir]
+
+    if args.only_along_path and args.only_optimized:
+        parser.error("--only_along_path and --only_optimized are mutually exclusive")
 
     opt_only = args.only_optimized and (opt_named or opt_list)
     if args.only_optimized and not opt_only:
@@ -364,39 +401,41 @@ if __name__ == '__main__':
 
             def _append_opt_entries(opt_dir):
                 abs_opt_dir = os.path.abspath(opt_dir)
-                added = False
-                if os.path.exists(abs_opt_dir):
-                    var_entries.append({
-                        'name': 'optimized',
-                        'type': 'optimized',
-                        'outdir': abs_opt_dir,
-                        'cfg_fn': None,
-                        'path_yaw': False
-                    })
-                    added = True
+                if abs_opt_dir.endswith("_path_yaw"):
+                    abs_opt_path_yaw = abs_opt_dir
                 else:
-                    log(Fore.RED + "Optimized directory does not exist: {}".format(abs_opt_dir))
-                    failed_cfgs.append(base_f_i + '-optimized-missing')
-
-                if args.along_path:
                     abs_opt_path_yaw = abs_opt_dir.rstrip(os.sep) + "_path_yaw"
-                    if os.path.exists(abs_opt_path_yaw):
-                        var_entries.append({
-                            'name': 'optimized_path_yaw',
-                            'type': 'optimized_path_yaw',
-                            'outdir': abs_opt_path_yaw,
-                            'cfg_fn': None,
-                            'path_yaw': True
-                        })
-                        added = True
-                    else:
-                        log(Fore.RED + "Optimized path-yaw directory does not exist: {}".format(
-                            abs_opt_path_yaw))
-                        failed_cfgs.append(base_f_i + '-optimized-path-yaw-missing')
+                if os.path.exists(abs_opt_path_yaw):
+                    var_entries.append({
+                        'name': 'optimized_path_yaw',
+                        'type': 'optimized_path_yaw',
+                        'outdir': abs_opt_path_yaw,
+                        'cfg_fn': None,
+                        'path_yaw': True
+                    })
+                    return True
+                log(Fore.RED + "Optimized path-yaw directory does not exist: {}".format(
+                    abs_opt_path_yaw))
+                failed_cfgs.append(base_f_i + '-optimized-path-yaw-missing')
+                return False
 
-                return added
-
-            if opt_only:
+            if args.only_along_path:
+                base_none_dir = os.path.abspath(os.path.join(
+                    base_outdir_i, "{}_none".format(exp_nm)))
+                if os.path.isdir(base_none_dir):
+                    var_entries.append({
+                        'special': 'along_path',
+                        'base_none_dir': base_none_dir,
+                        'outdir': os.path.join(base_none_dir, 'along_path'),
+                        'name': "{}_none_along_path".format(exp_nm),
+                        'type': 'along_path',
+                        'path_yaw': True,
+                    })
+                else:
+                    log(Fore.YELLOW + "Missing base none folder for along_path: {}".format(
+                        base_none_dir))
+                    failed_cfgs.append(base_f_i + '-along-path-missing')
+            elif opt_only:
                 if args.skip_optimized:
                     log(Fore.YELLOW + "Skip optimized entries (skip_optimized set).")
                     continue
@@ -407,21 +446,6 @@ if __name__ == '__main__':
                     continue
                 if not _append_opt_entries(opt_dir):
                     continue
-                base_none_dir = os.path.abspath(os.path.join(
-                    base_outdir_i, "{}_none".format(exp_nm)))
-                if os.path.isdir(base_none_dir):
-                    var_entries.append({
-                        'special': 'along_path',
-                        'base_none_dir': base_none_dir,
-                        'outdir': os.path.join(base_none_dir, 'along_path'),
-                        'name': "{}_none_along_path".format(exp_nm),
-                        'type': 'along_path',
-                        'path_yaw': True
-                    })
-                else:
-                    log(Fore.YELLOW + "Missing base none folder for along_path: {}".format(
-                        base_none_dir))
-                    failed_cfgs.append(base_f_i + '-along-path-missing')
             else:
                 for var_f_i in var_fns:
                     var_entries.append({
@@ -429,10 +453,26 @@ if __name__ == '__main__':
                         'outdir': None,  # to be filled
                         'path_yaw': False
                     })
-                if (not args.skip_optimized) and args.along_path and (opt_named or opt_list):
+                if (not args.skip_optimized) and (opt_named or opt_list):
                     opt_dir = _resolve_opt_dir(exp_nm, base_idx, base_names)
                     if opt_dir is not None:
                         _append_opt_entries(opt_dir)
+                if args.skip_optimized and args.along_path:
+                    base_none_dir = os.path.abspath(os.path.join(
+                        base_outdir_i, "{}_none".format(exp_nm)))
+                    if os.path.isdir(base_none_dir):
+                        var_entries.append({
+                            'special': 'along_path',
+                            'base_none_dir': base_none_dir,
+                            'outdir': os.path.join(base_none_dir, 'along_path'),
+                            'name': "{}_none_along_path".format(exp_nm),
+                            'type': 'along_path',
+                            'path_yaw': True,
+                        })
+                    else:
+                        log(Fore.YELLOW + "Missing base none folder for along_path: {}".format(
+                            base_none_dir))
+                        failed_cfgs.append(base_f_i + '-along-path-missing')
 
             base_total = len(var_entries)
             for var_idx, var_entry in enumerate(var_entries, start=1):
@@ -447,13 +487,10 @@ if __name__ == '__main__':
                     fail_label = base_f_i + '-along-path'
                 elif var_entry.get('cfg_fn') is None:
                     log(Fore.RED + "===== Running optimized folder {}... =====".format(var_entry['outdir']))
-                    if var_entry['name'] == 'optimized':
-                        var_nm_i = exp_nm + '_optimized'
-                    else:
-                        var_nm_i = exp_nm + '_' + var_entry['name']
+                    var_nm_i = exp_nm + '_' + var_entry['name']
                     input_dir_i = var_entry['outdir']
                     outdir_i = input_dir_i
-                    var_type = var_entry.get('type', 'optimized')
+                    var_type = var_entry.get('type', 'optimized_path_yaw')
                     entry_path_yaw = var_entry.get('path_yaw', False)
                     fail_label = base_f_i + '-optimized'
                 else:
@@ -461,10 +498,10 @@ if __name__ == '__main__':
                     log(Fore.RED + "===== Running variation {}... =====".format(var_f_i))
                     with open(var_f_i) as fvar:
                         var_opts_i = yaml.load(fvar, Loader=yaml.FullLoader)
-                    if args.only_optimized and var_opts_i.get('type') != 'optimized':
+                    if args.only_optimized and var_opts_i.get('type') != 'optimized_path_yaw':
                         log(Fore.BLUE + "> Skip variation (only_optimized set).")
                         continue
-                    if args.skip_optimized and var_opts_i.get('type') in ('optimized', 'optimized_path_yaw'):
+                    if args.skip_optimized and var_opts_i.get('type') in ('optimized_path_yaw',):
                         log(Fore.BLUE + "> Skip variation (skip_optimized set).")
                         continue
                     var_nm_i = exp_nm + '_' + var_opts_i['type']
@@ -487,8 +524,11 @@ if __name__ == '__main__':
                         log(Fore.RED + "Missing base none dir for along_path: {}".format(
                             base_none_dir))
                         continue
-                    if not _ensure_along_path_output(base_none_dir, outdir_i, gen_path_yaw_sc):
+                    allow_generate = (not args.no_generate_along_path) and var_entry.get('generate', True)
+                    if not _ensure_along_path_output(base_none_dir, outdir_i, gen_path_yaw_sc, allow_generate):
                         failed_cfgs.append(fail_label + '-path-yaw')
+                        if args.no_generate_along_path:
+                            log(Fore.RED + "along_path poses missing (generation disabled): {}".format(outdir_i))
                         continue
                     _copy_if_exists(os.path.join(base_none_dir, 'rrt_stats.txt'),
                                     os.path.join(outdir_i, 'rrt_stats.txt'))
@@ -546,8 +586,18 @@ if __name__ == '__main__':
                     if not os.path.exists(outdir_i):
                         os.makedirs(outdir_i)
 
+                    ue_pose_use = ue_pose_fn
+                    if args.max_reg_images > 0:
+                        ue_pose_use, limit_info = _limit_pose_list(
+                            ue_pose_fn, args.max_reg_images, render_dir_i)
+                        if limit_info is not None:
+                            n_before, n_after = limit_info
+                            if n_before > n_after:
+                                log(Fore.BLUE + "Limit render poses: {} -> {}".format(
+                                    n_before, n_after))
+
                     render_cmd =  "{} {} --save_dir {}".format(
-                        ren_list_sc, ue_pose_fn, render_dir_i)
+                        ren_list_sc, ue_pose_use, render_dir_i)
                     if args.render_width is not None:
                         render_cmd += " --width {}".format(args.render_width)
                     if args.render_height is not None:

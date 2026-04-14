@@ -3,7 +3,6 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/../../.." && pwd)"
-gen_path_yaw="${script_dir}/generate_path_yaw.py"
 
 manifold_bin="${FOV_MANIFOLD_BIN:-${root_dir}/My_FoV_Optimization/Manifold_cpp/build/manifold_test_trajectory}"
 default_trace_root="${root_dir}/my_FIF-perception-aware-planning/act_map_exp/trace_r2_a20"
@@ -50,7 +49,28 @@ sys.exit(ret)
 PY
 }
 
-mode="normal"
+run_along_path_opt() {
+  local input_dir="$1"
+  local output_dir="$2"
+  local points3d="$3"
+  local along_path_input="${input_dir}/along_path/stamped_Twc_path_yaw.txt"
+  if [[ -f "${along_path_input}" && -z "${FOV_OPT_WARM_START:-}" && -z "${FOV_OPT_WARM_START_FILE:-}" ]]; then
+    FOV_OPT_WARM_START=1 FOV_OPT_WARM_START_FILE="${along_path_input}" \
+      run_with_timing "${output_dir}" "${manifold_bin}" "${input_dir}" "${output_dir}" 1 "${points3d}"
+  else
+    run_with_timing "${output_dir}" "${manifold_bin}" "${input_dir}" "${output_dir}" 1 "${points3d}"
+  fi
+}
+
+cleanup_quiver_metrics() {
+  local output_dir="$1"
+  if [[ "${FOV_OPT_KEEP_METRICS:-0}" == "1" ]]; then
+    return
+  fi
+  rm -f "${output_dir}"/quivers*_metrics.txt 2>/dev/null || true
+}
+
+mode="along"
 views=()
 dataset=""
 trace_root_override=""
@@ -62,9 +82,9 @@ while [[ $# -gt 0 ]]; do
       mode="along"
       shift
       ;;
-    --both)
-      mode="both"
-      shift
+    --normal|--both)
+      echo "Error: only optimized_path_yaw is supported now (use --along-path or no mode)." >&2
+      exit 2
       ;;
     --dataset)
       dataset="$2"
@@ -79,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help|-h)
-      echo "Usage: $0 [--along-path|--both] [view1 view2 ...]" >&2
+      echo "Usage: $0 [--along-path] [view1 view2 ...]" >&2
       echo "Default views: all subdirs in the trace root that contain <view>_none." >&2
       echo "Options:" >&2
       echo "  --dataset r2_a20|r1_a30" >&2
@@ -143,33 +163,16 @@ fi
 
 for view in "${views[@]}"; do
   input_dir="${trace_root}/${view}/${view}_none"
-  output_dir="${input_dir}/optimized"
   output_dir_path_yaw="${input_dir}/optimized_path_yaw"
   if [[ ! -d "${input_dir}" ]]; then
     echo "Missing input dir: ${input_dir}" >&2
     continue
   fi
   case "${mode}" in
-    normal)
-      mkdir -p "${output_dir}"
-      run_with_timing "${output_dir}" "${manifold_bin}" "${input_dir}" "${output_dir}" 0 "${points3d}"
-      ;;
     along)
-      if [[ -f "${gen_path_yaw}" ]]; then
-        mkdir -p "${input_dir}/along_path"
-        python3 "${gen_path_yaw}" --input_dir "${input_dir}" --output_dir "${input_dir}/along_path"
-      fi
       mkdir -p "${output_dir_path_yaw}"
-      run_with_timing "${output_dir_path_yaw}" "${manifold_bin}" "${input_dir}" "${output_dir_path_yaw}" 1 "${points3d}"
-      ;;
-    both)
-      if [[ -f "${gen_path_yaw}" ]]; then
-        mkdir -p "${input_dir}/along_path"
-        python3 "${gen_path_yaw}" --input_dir "${input_dir}" --output_dir "${input_dir}/along_path"
-      fi
-      mkdir -p "${output_dir}" "${output_dir_path_yaw}"
-      run_with_timing "${output_dir}" "${manifold_bin}" "${input_dir}" "${output_dir}" 0 "${points3d}"
-      run_with_timing "${output_dir_path_yaw}" "${manifold_bin}" "${input_dir}" "${output_dir_path_yaw}" 1 "${points3d}"
+      run_along_path_opt "${input_dir}" "${output_dir_path_yaw}" "${points3d}"
+      cleanup_quiver_metrics "${output_dir_path_yaw}"
       ;;
   esac
 done

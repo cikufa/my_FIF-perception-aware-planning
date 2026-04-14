@@ -9,7 +9,12 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import rc
-from analyze_pose_errors import _loadPoseError
+from analyze_pose_errors import (
+    _loadPoseError,
+    EXCLUDE_OPTIMIZED,
+    _filter_cfg_for_optimized,
+    _is_optimized_name,
+)
 
 from wandb_utils import add_wandb_args, safe_init, log_images, log_metrics, finish
 
@@ -28,20 +33,12 @@ kSecPerOutIter = 5.0
 def _collectSubdirs(cfg_dir):
     subdir_map = {}
     for name in sorted(os.listdir(cfg_dir)):
+        if name == "optimized":
+            continue
         path = os.path.join(cfg_dir, name)
         if os.path.isdir(path):
             subdir_map[name] = path
     for name, path in list(subdir_map.items()):
-        opt_dir = os.path.join(path, 'optimized')
-        if os.path.isdir(opt_dir):
-            opt_name = name + '_optimized'
-            if opt_name not in subdir_map:
-                subdir_map[opt_name] = opt_dir
-        opt_path_yaw_dir = os.path.join(path, 'optimized_path_yaw')
-        if os.path.isdir(opt_path_yaw_dir):
-            opt_name = name + '_optimized_path_yaw'
-            if opt_name not in subdir_map:
-                subdir_map[opt_name] = opt_path_yaw_dir
         along_path_dir = os.path.join(path, 'along_path')
         if os.path.isdir(along_path_dir):
             along_name = name + '_along_path'
@@ -61,13 +58,30 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
     if base_cfg:
         ana_cfg.update(base_cfg)
         print("Effective analysis configuration {}".format(ana_cfg))
+    _filter_cfg_for_optimized(ana_cfg)
 
     subdir_map = _collectSubdirs(cfg_dir)
     if 'ordered_subdir_nms' in ana_cfg:
         subdir_nms = ana_cfg['ordered_subdir_nms']
     else:
         subdir_nms = sorted(subdir_map.keys())
+    if EXCLUDE_OPTIMIZED and subdir_nms:
+        subdir_nms = [v for v in subdir_nms if not _is_optimized_name(v)]
     subdirs = [subdir_map.get(v, os.path.join(cfg_dir, v)) for v in subdir_nms]
+    valid_subdir_nms = []
+    valid_subdirs = []
+    for nm, sd in zip(subdir_nms, subdirs):
+        rrt_stats_fn = os.path.join(sd, rrt_stats_nm)
+        if not os.path.exists(rrt_stats_fn):
+            print(Fore.YELLOW + "Skip {} (missing {}).".format(sd, rrt_stats_nm))
+            continue
+        valid_subdir_nms.append(nm)
+        valid_subdirs.append(sd)
+    subdir_nms = valid_subdir_nms
+    subdirs = valid_subdirs
+    if not subdir_nms:
+        print(Fore.YELLOW + "No RRT stats found under {}; skipping.".format(cfg_dir))
+        return {}, []
     print("Going to analyze variations {}".format(subdir_nms))
 
     has_exact_solution = []
@@ -83,7 +97,6 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
     for idx, sd in enumerate(subdirs):
         print("- Process {}...".format(sd))
         rrt_stats_fn_i = os.path.join(sd, rrt_stats_nm)
-        assert os.path.exists(rrt_stats_fn_i)
         rrt_stats_i = np.loadtxt(rrt_stats_fn_i)
         assert rrt_stats_i.shape[1] == 5
         nm_i = subdir_nms[idx]

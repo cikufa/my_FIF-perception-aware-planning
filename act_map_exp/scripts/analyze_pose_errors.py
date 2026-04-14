@@ -315,9 +315,18 @@ def _avg_pair(a, b):
         return float('nan')
     return float(sum(vals) / len(vals))
 
+def _plot_legend_label(type_key, base_cfg):
+    if type_key in ('optimized_path_yaw', 'optimized'):
+        return 'ours'
+    labels = base_cfg.get('labels') if isinstance(base_cfg, dict) else None
+    if isinstance(labels, dict) and type_key in labels:
+        return str(labels[type_key])
+    return type_key
+
+
 def _paper_label(name, base_cfg):
-    if name == 'optimized_path_yaw':
-        return 'optimized(ours)'
+    if name in ('optimized_path_yaw', 'optimized'):
+        return 'ours'
     if name == 'none':
         return 'no info'
     labels = base_cfg.get('labels') if isinstance(base_cfg, dict) else None
@@ -325,18 +334,73 @@ def _paper_label(name, base_cfg):
         return str(labels[name])
     return name
 
-def _style_paper_axes(ax):
+
+def _resolve_map_label(top_dir, override=None):
+    if override is not None and str(override).strip():
+        return str(override).strip()
+    base = os.path.basename(os.path.abspath(top_dir).rstrip(os.sep))
+    if base.startswith('trace_'):
+        return base[len('trace_') :]
+    return base if base else None
+
+
+def _map_title_suffix(map_label):
+    if not map_label:
+        return ''
+    return ' ({})'.format(map_label)
+
+
+def _png_filename_suffix(map_label):
+    if not map_label:
+        return ''
+    safe = str(map_label).strip().replace(' ', '_')
+    return '_{}'.format(safe)
+
+
+# Shared typography for outputs under paper_figs/ (column titles = variation names)
+PAPER_COL_FONTSIZE = 14
+PAPER_YLABEL_FONTSIZE = 13
+PAPER_TICK_FONTSIZE = 12
+PAPER_SUPTITLE_FONTSIZE = 14
+
+# Violin plots: larger column titles and figure titles than default axes
+VIOLIN_COL_FONTSIZE = 19
+VIOLIN_YLABEL_FONTSIZE = 16
+VIOLIN_YTICK_FONTSIZE = 13
+VIOLIN_SUPTITLE_FONTSIZE = 21
+# Figure title sits just above axes (tighter than y>1 for paper clarity)
+VIOLIN_SUPTITLE_Y = 0.985
+VIOLIN_WSPACE = 0.10
+VIOLIN_AX_TOP = 0.93
+VIOLIN_WIDTH = 0.82
+# Violin plots: fixed y ranges so TE/RE are comparable across runs (meters / degrees).
+VIOLIN_YLIM_TE = (0.0, 1.0)
+VIOLIN_YLIM_RE = (0.0, 10.0)
+
+
+def _style_paper_axes(ax, tick_labelsize=PAPER_TICK_FONTSIZE):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.grid(axis='y', alpha=0.20, linewidth=0.7)
     ax.set_axisbelow(True)
-    ax.tick_params(axis='both', labelsize=12)
+    ax.tick_params(axis='both', labelsize=tick_labelsize)
+
+
+def _set_paper_column_ticklabels(ax, labels, rotation=30):
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(
+        labels,
+        rotation=rotation,
+        ha='right',
+        rotation_mode='anchor',
+        fontsize=PAPER_COL_FONTSIZE,
+    )
+
 
 def _finalize_paper_bar_plot(fig, ax, labels):
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=30, ha='right', rotation_mode='anchor', fontsize=12)
+    _set_paper_column_ticklabels(ax, labels)
     fig.tight_layout()
-    fig.subplots_adjust(left=0.18, bottom=0.30)
+    fig.subplots_adjust(left=0.18, bottom=0.36)
 
 def _resolve_norm_ref(values, prefer_key=None):
     if prefer_key is not None and prefer_key in values:
@@ -350,6 +414,93 @@ def _resolve_norm_ref(values, prefer_key=None):
 
 def _save_png(fig, out_fn, pad=0.25, dpi=300):
     fig.savefig(out_fn, bbox_inches='tight', pad_inches=pad, dpi=dpi)
+
+
+def _violin_finite_array(values):
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return np.array([0.0])
+    return arr
+
+
+def _style_violin_parts(parts, colors):
+    bodies = parts.get('bodies', [])
+    for i, b in enumerate(bodies):
+        col = colors[i] if i < len(colors) else '#888888'
+        b.set_facecolor(col)
+        b.set_alpha(0.55)
+        b.set_edgecolor('#333333')
+        b.set_linewidth(0.45)
+    for key in ('cbars', 'cmins', 'cmaxes'):
+        if key not in parts:
+            continue
+        ob = parts[key]
+        if isinstance(ob, (list, tuple)):
+            for ln in ob:
+                ln.set_color('#555555')
+                ln.set_linewidth(0.6)
+        elif hasattr(ob, 'set_color'):
+            ob.set_color('#555555')
+            if hasattr(ob, 'set_linewidth'):
+                ob.set_linewidth(0.6)
+    if 'cmeans' in parts and hasattr(parts['cmeans'], 'set_color'):
+        parts['cmeans'].set_color('#111111')
+        if hasattr(parts['cmeans'], 'set_linewidth'):
+            parts['cmeans'].set_linewidth(1.1)
+    if 'cmedians' in parts and hasattr(parts['cmedians'], 'set_color'):
+        parts['cmedians'].set_color('#000000')
+        if hasattr(parts['cmedians'], 'set_linewidth'):
+            parts['cmedians'].set_linewidth(1.0)
+
+
+def _plot_violin_panel(ax, datasets, labels, colors, ylabel, ylim_max=None,
+                       ylim=None,
+                       column_label_fontsize=None, ylabel_fontsize=None):
+    if column_label_fontsize is None:
+        column_label_fontsize = VIOLIN_COL_FONTSIZE
+    if ylabel_fontsize is None:
+        ylabel_fontsize = VIOLIN_YLABEL_FONTSIZE
+    cleaned = [_violin_finite_array(d) for d in datasets]
+    positions = np.arange(1, len(labels) + 1)
+    parts = ax.violinplot(
+        cleaned,
+        positions=positions,
+        widths=VIOLIN_WIDTH,
+        showmeans=True,
+        showmedians=True,
+        showextrema=True,
+    )
+    _style_violin_parts(parts, colors)
+    ax.set_xticks(positions)
+    ax.set_xticklabels(
+        labels, rotation=28, ha='right', rotation_mode='anchor',
+        fontsize=column_label_fontsize,
+    )
+    ax.set_ylabel(ylabel, fontsize=ylabel_fontsize)
+    ax.tick_params(axis='y', labelsize=VIOLIN_YTICK_FONTSIZE)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.grid(axis='y', alpha=0.22, linewidth=0.65)
+    ax.set_axisbelow(True)
+    if ylim is not None and len(ylim) == 2:
+        ymin, ymax = float(ylim[0]), float(ylim[1])
+        if math.isfinite(ymin) and math.isfinite(ymax) and ymax > ymin:
+            ax.set_ylim(ymin, ymax)
+    elif ylim_max is not None and math.isfinite(ylim_max) and ylim_max > 0:
+        ax.set_ylim(0.0, ylim_max * 1.04)
+
+
+def _finalize_violin_figure(fig, bottom_pad=0.32):
+    fig.tight_layout()
+    fig.subplots_adjust(
+        left=0.10,
+        bottom=bottom_pad,
+        right=0.99,
+        top=VIOLIN_AX_TOP,
+        wspace=VIOLIN_WSPACE,
+    )
+
 
 def _finalize_reg_bar_plot(fig, ax, labels):
     ax.set_xticks(range(len(labels)))
@@ -383,6 +534,194 @@ def _ensure_mode_dirs(top_dir):
     for d in modes.values():
         os.makedirs(d, exist_ok=True)
     return modes
+
+
+def _read_mean_float_file(path):
+    """Mean of whitespace-separated floats in a text file (planning or optimization logs)."""
+    if not path or not os.path.isfile(path):
+        return float('nan')
+    try:
+        with open(path, 'r') as f:
+            vals = [float(x) for x in f.read().split() if x]
+        if not vals:
+            return float('nan')
+        return float(np.mean(vals))
+    except Exception:
+        return float('nan')
+
+
+def _read_fov_optimization_time_seconds(path):
+    """Mean wall time (s) from optimization_time_sec.txt (whitespace-separated floats)."""
+    return _read_mean_float_file(path)
+
+
+# Fisher traj-opt rows (ceres_summary.yaml); order matches typical reporting; 'ours' is FoV-refined.
+_PIPELINE_RUNTIME_VARIANT_ROWS = (
+    ('none', 'No Info.'),
+    ('gp_trace', 'GP-Trace'),
+    ('gp_det', 'GP-Det'),
+    ('quad_trace', 'Quad-Trace'),
+    ('quad_det', 'Quad-Det'),
+    ('pc_trace', 'PC-Trace'),
+    ('pc_det', 'PC-Det'),
+    ('ours', 'Ours'),
+)
+
+
+def _read_ceres_traj_opt_seconds(path):
+    """Table V style: custom_solve_time - custom_logger_time (see analyze_traj_opt.py, ceres_summary.yaml)."""
+    if not path or not os.path.isfile(path):
+        return float('nan')
+    try:
+        with open(path, 'r') as f:
+            d = yaml.load(f, Loader=yaml.FullLoader)
+        if not isinstance(d, dict):
+            return float('nan')
+        cs = float(d['custom_solve_time'])
+        cl = float(d['custom_logger_time'])
+        return cs - cl
+    except Exception:
+        return float('nan')
+
+
+def _mean_ceres_variant_over_cfgs(traj_root, cfg_nms, suffix):
+    """Mean Ceres traj-opt time for cfg_<suffix> under traj_root (Fisher variants)."""
+    vals = []
+    for cfg in cfg_nms:
+        p = os.path.join(traj_root, cfg, '{}_{}'.format(cfg, suffix), 'ceres_summary.yaml')
+        t = _read_ceres_traj_opt_seconds(p)
+        if math.isfinite(t):
+            vals.append(t)
+    return float(np.mean(vals)) if vals else float('nan')
+
+
+def _mean_ceres_xyz_none_over_cfgs(xyz_root, cfg_nms):
+    """Mean traj-opt time for xyz-only none baseline (ceres_summary in *_none/)."""
+    vals = []
+    for cfg in cfg_nms:
+        p = os.path.join(xyz_root, cfg, cfg + '_none', 'ceres_summary.yaml')
+        t = _read_ceres_traj_opt_seconds(p)
+        if math.isfinite(t):
+            vals.append(t)
+    return float(np.mean(vals)) if vals else float('nan')
+
+
+def _mean_fov_opt_over_cfgs(fov_root, cfg_nms):
+    """Mean FoV manifold time from optimization_time_sec.txt (ours only)."""
+    vals = []
+    for cfg in cfg_nms:
+        p = os.path.join(fov_root, cfg, cfg + '_none', 'optimized_path_yaw', 'optimization_time_sec.txt')
+        t = _read_fov_optimization_time_seconds(p)
+        if math.isfinite(t):
+            vals.append(t)
+    return float(np.mean(vals)) if vals else float('nan')
+
+
+def _latex_escape_header(s):
+    return s.replace('_', r'\_')
+
+
+def _write_pipeline_runtime_tables(
+        finite_out_dir, cfg_nms, top_dir, plot_suffix, map_label=None,
+        merge_optimized_from=None):
+    """Rows = method variants; cols = Ceres traj-opt (mean over cfgs) + FoV (nonzero on Ours only)."""
+    if not cfg_nms:
+        return
+    traj_root = os.path.abspath(top_dir)
+    merge_root = merge_optimized_from
+    if merge_root and os.path.isdir(merge_root):
+        merge_root = os.path.abspath(merge_root)
+    else:
+        merge_root = None
+    # FoV outputs and xyz-only none Ceres live on the xyz trace when merging traj_opt + traj_opt_xyz.
+    xyz_fov_root = merge_root if merge_root else traj_root
+
+    n_traj = len(cfg_nms)
+    tag = map_label or os.path.basename(traj_root.rstrip(os.sep))
+
+    table_rows = []
+    for key, label in _PIPELINE_RUNTIME_VARIANT_ROWS:
+        if key == 'ours':
+            traj_t = _mean_ceres_xyz_none_over_cfgs(xyz_fov_root, cfg_nms)
+            fov_t = _mean_fov_opt_over_cfgs(xyz_fov_root, cfg_nms)
+        else:
+            traj_t = _mean_ceres_variant_over_cfgs(traj_root, cfg_nms, key)
+            fov_t = 0.0
+        table_rows.append((key, label, traj_t, fov_t))
+
+    lines = []
+    lines.append('% Traj opt: mean over trajectories of (custom_solve_time - custom_logger_time) from ceres_summary.yaml')
+    lines.append('%   (Fisher variants under traj_root; Ours baseline Ceres under xyz_fov_root/.../cfg_none/).')
+    lines.append('% FoV opt: mean over trajectories of optimization_time_sec.txt under .../optimized_path_yaw/ (Ours only).')
+    lines.append('% traj_root (Fisher): {}'.format(traj_root))
+    lines.append('% xyz_fov_root (Ours Ceres + FoV): {}'.format(xyz_fov_root))
+    lines.append('% trajectories (n={}): {}'.format(n_traj, ','.join(sorted(cfg_nms))))
+
+    lines.append('\\begin{table}[t]')
+    lines.append('\\centering')
+    lines.append('\\small')
+    # Double {{ }} around \\texttt{...} so str.format does not treat {ceres\\_summary} as a field.
+    cap = (
+        'Mean planning time (s) from \\texttt{{ceres\\_summary.yaml}} '
+        '(\\texttt{{custom\\_solve\\_time}} $-$ \\texttt{{custom\\_logger\\_time}}), '
+        'and FoV refinement time (s) for Ours only; other rows use 0. '
+        'Averaged over {} trajectories.'.format(n_traj)
+    )
+    if tag:
+        cap += ' Map: {}.'.format(tag.replace('_', r'\_'))
+    lines.append('\\caption{{{}}}'.format(cap))
+    lines.append('\\begin{tabular}{lrr}')
+    lines.append('\\toprule')
+    lines.append('Method & Traj opt (s) & FoV opt (s) \\\\')
+    lines.append('\\midrule')
+
+    for row_key, label, traj_t, fov_t in table_rows:
+        lbl = _latex_escape_header(label)
+        ts = '{:.4f}'.format(traj_t) if math.isfinite(traj_t) else '---'
+        if row_key == 'ours':
+            fs = '{:.4f}'.format(fov_t) if math.isfinite(fov_t) else '---'
+        else:
+            fs = '0.0000'
+        lines.append('{} & {} & {} \\\\'.format(lbl, ts, fs))
+
+    lines.append('\\bottomrule')
+    lines.append('\\end{tabular}')
+    lines.append('\\end{table}')
+    body = '\n'.join(lines) + '\n'
+
+    os.makedirs(finite_out_dir, exist_ok=True)
+    bases = (
+        'pipeline_runtime{}'.format(plot_suffix),
+        'fov_optimization_runtime{}'.format(plot_suffix),
+    )
+    for base in bases:
+        tex_fn = os.path.join(finite_out_dir, base + '.tex')
+        txt_fn = os.path.join(finite_out_dir, base + '.txt')
+        with open(tex_fn, 'w', encoding='utf-8') as f:
+            f.write(body)
+        with open(txt_fn, 'w', encoding='utf-8') as f:
+            f.write(body)
+
+        csv_fn = os.path.join(finite_out_dir, base + '.csv')
+        with open(csv_fn, 'w', encoding='utf-8') as f:
+            f.write('variant_key,label,traj_opt_sec_mean,fov_opt_sec_mean\n')
+            for key, label, traj_t, fov_t in table_rows:
+                if key == 'ours':
+                    fov_cell = '{:.8g}'.format(fov_t) if math.isfinite(fov_t) else ''
+                else:
+                    fov_cell = '0'
+                f.write('{},{},{},{}\n'.format(
+                    key,
+                    label,
+                    '{:.8g}'.format(traj_t) if math.isfinite(traj_t) else '',
+                    fov_cell,
+                ))
+            f.write('# traj_root_fisher={}\n'.format(traj_root))
+            f.write('# xyz_fov_root={}\n'.format(xyz_fov_root))
+            f.write('# n_trajectories={}\n'.format(n_traj))
+
+    print(Fore.YELLOW + "Wrote pipeline runtime (variant rows, Ceres + FoV): "
+          "pipeline_runtime{}.tex, .csv".format(plot_suffix))
 
 
 def _write_error_stats_csv(out_dir, plot_suffix, ordered_types, trans_stats, rot_stats):
@@ -546,7 +885,7 @@ def _ensureOptimizedPathYawStyle(cfg):
     if 'labels' not in cfg or 'colors' not in cfg or 'linestyles' not in cfg:
         return
     if 'optimized_path_yaw' not in cfg['labels']:
-        cfg['labels']['optimized_path_yaw'] = 'optimized_path_yaw'
+        cfg['labels']['optimized_path_yaw'] = 'ours'
     if 'optimized_path_yaw' not in cfg['colors']:
         cfg['colors']['optimized_path_yaw'] = cfg['colors'].get('optimized', 'orange')
     if 'optimized_path_yaw' not in cfg['linestyles']:
@@ -639,11 +978,14 @@ def _collectOptimizedPathYawForCfg(cfg_dir, base_cfg):
 
 def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
                      wandb_mod=None, wandb_prefix="",
-                     pose_e_name=None, twc_name=None, plot_suffix=""):
+                     pose_e_name=None, twc_name=None, plot_suffix="",
+                     map_label=None):
     if pose_e_name is None:
         pose_e_name = pose_e_nm
     if twc_name is None:
         twc_name = Twc_nm
+    ms = _map_title_suffix(map_label)
+    png_fs = _png_filename_suffix(map_label)
     print(Fore.RED + "==== process configuration {} ====".format(cfg_dir))
     analysis_cfg_fn = os.path.join(cfg_dir, 'analysis_cfg.yaml')
     subdir_map = _collectSubdirs(cfg_dir)
@@ -746,14 +1088,20 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
             print(Fore.RED + "Error for {} is empty, skip plotting.".format(nm))
             continue
         type_i = ana_cfg['types'][nm]
-        pos_ax.plot(times[idx], trans_e_m[idx], label=ana_cfg['labels'][type_i],
+        if type_i == 'along_path':
+            continue
+        pos_ax.plot(times[idx], trans_e_m[idx], label=_plot_legend_label(type_i, ana_cfg),
                     color=ana_cfg['colors'][type_i], linestyle=ana_cfg['linestyles'][type_i])
-        rot_ax.plot(times[idx], rot_e_deg[idx], label=ana_cfg['labels'][type_i],
+        rot_ax.plot(times[idx], rot_e_deg[idx], label=_plot_legend_label(type_i, ana_cfg),
                     color=ana_cfg['colors'][type_i], linestyle=ana_cfg['linestyles'][type_i])
     print('saving error plots...')
-    plt.legend()
+    _handles, _labs = pos_ax.get_legend_handles_labels()
+    if _handles:
+        plt.legend()
+    fig.suptitle('Pose error vs time{}'.format(ms), fontsize=12, y=0.98)
     fig.tight_layout()
-    errors_plot_fn = os.path.join(cfg_dir, 'errors_comp{}.png'.format(plot_suffix))
+    fig.subplots_adjust(top=0.86)
+    errors_plot_fn = os.path.join(cfg_dir, 'errors_comp{}.png'.format(plot_suffix + png_fs))
     _save_png(fig, errors_plot_fn, pad=0.25, dpi=300)
 
     reg_rows = []
@@ -778,17 +1126,21 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
                     nm, nonreg_ratio, reg_ratio, n_failed, total))
 
     if reg_rows:
-        labels = [v[0] for v in reg_rows]
-        ratios = [v[1] for v in reg_rows]
-        fig_reg = plt.figure(figsize=(11, 5))
-        ax = fig_reg.add_subplot(111)
-        bars = ax.bar(range(len(labels)), ratios, color='gray')
-        ax.set_ylabel('non-registered ratio')
-        ax.set_ylim(0, 1.05)
-        _annotate_bar_values(ax, bars)
-        _finalize_reg_bar_plot(fig_reg, ax, labels)
-        reg_plot_fn = os.path.join(cfg_dir, 'registration_stats{}.png'.format(plot_suffix))
-        _save_png(fig_reg, reg_plot_fn, pad=0.25, dpi=300)
+        plot_reg = [r for r in reg_rows if ana_cfg['types'].get(r[0]) != 'along_path']
+        if plot_reg:
+            labels = [v[0] for v in plot_reg]
+            ratios = [v[1] for v in plot_reg]
+            fig_reg = plt.figure(figsize=(11, 5))
+            ax = fig_reg.add_subplot(111)
+            bars = ax.bar(range(len(labels)), ratios, color='gray')
+            ax.set_ylabel('non-registered ratio')
+            ax.set_ylim(0, 1.05)
+            _annotate_bar_values(ax, bars)
+            fig_reg.suptitle('Registration failure rate{}'.format(ms), fontsize=12, y=0.98)
+            _finalize_reg_bar_plot(fig_reg, ax, labels)
+            fig_reg.subplots_adjust(top=0.88)
+            reg_plot_fn = os.path.join(cfg_dir, 'registration_stats{}.png'.format(plot_suffix + png_fs))
+            _save_png(fig_reg, reg_plot_fn, pad=0.25, dpi=300)
 
     trans_e_raw = {}
     rot_e_raw = {}
@@ -962,7 +1314,7 @@ def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
             for stat_key, stat_val in stats.items():
                 metrics["{}rot_{}/{}".format(prefix, stat_key, type_key)] = stat_val
         log_metrics(wandb_mod, metrics)
-        plot_key = 'errors_comp{}'.format(plot_suffix)
+        plot_key = 'errors_comp{}'.format(plot_suffix + png_fs)
         log_images(wandb_mod, {prefix + plot_key: errors_plot_fn})
 
     return trans_e_raw, rot_e_raw
@@ -972,12 +1324,17 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                          pose_e_name=None, twc_name=None, plot_suffix=""):
     if base_ana_cfg:
         _filter_cfg_for_optimized(base_ana_cfg)
+    artifact_dir = os.path.abspath(getattr(args, 'analysis_artifacts_dir', None) or top_dir)
+    os.makedirs(artifact_dir, exist_ok=True)
     cfg_nms = [v for v in sorted(os.listdir(top_dir))
                if os.path.isdir(os.path.join(top_dir, v))]
     include_set = getattr(args, "include_set", None)
     if include_set:
         cfg_nms = [v for v in cfg_nms if v in include_set]
     cfg_dirs = [os.path.join(top_dir, v) for v in cfg_nms]
+    map_label = getattr(args, 'map_label', None)
+    ms = _map_title_suffix(map_label)
+    png_fs = _png_filename_suffix(map_label)
     print(Fore.YELLOW + "1. Analyzing configurations under {}:".format(top_dir))
     for v in cfg_nms:
         print(Fore.YELLOW + "- {}".format(v))
@@ -988,9 +1345,17 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
         cfg_key = os.path.basename(cfg_d_i.rstrip(os.sep))
         trans_e_i, rot_e_i = analyzeSingleCfg(
             cfg_d_i, base_cfg=base_ana_cfg, wandb_mod=wandb_mod, wandb_prefix=cfg_key,
-            pose_e_name=pose_e_name, twc_name=twc_name, plot_suffix=plot_suffix)
+            pose_e_name=pose_e_name, twc_name=twc_name, plot_suffix=plot_suffix,
+            map_label=map_label)
         if base_ana_cfg:
             t_py, r_py = _collectOptimizedPathYawForCfg(cfg_d_i, base_ana_cfg)
+            merge_root = getattr(args, 'merge_optimized_from', None)
+            if merge_root:
+                merge_cfg = os.path.join(os.path.abspath(merge_root), cfg_key)
+                if os.path.isdir(merge_cfg):
+                    t_ex, r_ex = _collectOptimizedPathYawForCfg(merge_cfg, base_ana_cfg)
+                    t_py = list(t_py) + list(t_ex)
+                    r_py = list(r_py) + list(r_ex)
             if t_py or r_py:
                 trans_e_i = dict(trans_e_i)
                 rot_e_i = dict(rot_e_i)
@@ -1027,7 +1392,8 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
             ordered_types = sorted(set(acc_trans_e.keys()) | set(acc_rot_e.keys()))
     if EXCLUDE_OPTIMIZED and ordered_types:
         ordered_types = [v for v in ordered_types if v != OPTIMIZED_TYPE]
-    mode_dirs = _ensure_mode_dirs(top_dir)
+    plot_ordered_types = [t for t in ordered_types if t != 'along_path']
+    mode_dirs = _ensure_mode_dirs(artifact_dir)
     plot_max_trans_e = 1.2 * base_ana_cfg['hist_max_trans_e']
     plot_max_rot_e = 1.2 * base_ana_cfg['hist_max_rot_e']
 
@@ -1051,8 +1417,8 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
         'penalized': (trans_stats_pen, rot_stats_pen),
     }
 
-    _write_error_stats_csv(top_dir, plot_suffix, ordered_types, trans_stats, rot_stats)
-    _write_compare_vs_optimized(top_dir, plot_suffix, ordered_types, trans_stats, rot_stats)
+    _write_error_stats_csv(artifact_dir, plot_suffix, ordered_types, trans_stats, rot_stats)
+    _write_compare_vs_optimized(artifact_dir, plot_suffix, ordered_types, trans_stats, rot_stats)
     _print_error_stats_summary(ordered_types, trans_stats, rot_stats)
     _print_error_stats_summary_penalized(ordered_types, trans_stats_pen, rot_stats_pen)
     _print_compare_vs_optimized_summary(ordered_types, trans_stats, rot_stats)
@@ -1123,7 +1489,7 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                 'rot_count': r_stats_p['count'],
             }
 
-    per_cfg_fn = os.path.join(top_dir, 'overall_per_cfg_stats{}.csv'.format(plot_suffix))
+    per_cfg_fn = os.path.join(artifact_dir, 'overall_per_cfg_stats{}.csv'.format(plot_suffix))
     with open(per_cfg_fn, 'w') as f:
         f.write('cfg,type,nan_ratio,nan_count,total,trans_mean,trans_std,trans_count,rot_mean,rot_std,rot_count\n')
         for v in ordered_types:
@@ -1195,6 +1561,15 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                     ))
         print(Fore.YELLOW + "Saved per-config stats to {}".format(out_fn))
 
+    _write_pipeline_runtime_tables(
+        mode_dirs['finite'],
+        cfg_nms,
+        top_dir,
+        plot_suffix,
+        getattr(args, 'map_label', None),
+        getattr(args, 'merge_optimized_from', None),
+    )
+
     reg_overall = {}
     for k, v in acc_rot_e.items():
         total = len(v)
@@ -1208,10 +1583,10 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
 
     reg_labels = []
     reg_values = []
-    for k in ordered_types:
+    for k in plot_ordered_types:
         if k not in reg_overall:
             continue
-        reg_labels.append(k)
+        reg_labels.append(_plot_legend_label(k, base_ana_cfg))
         reg_values.append(reg_overall[k][0])
 
     under_trans_thresh = 1.0
@@ -1219,18 +1594,18 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
 
     mode_out_dirs = {
         'finite': [mode_dirs['finite']],
-        'original': [mode_dirs['original'], top_dir],
+        'original': [mode_dirs['original'], artifact_dir],
         'penalized': [mode_dirs['penalized']],
     }
 
     if ordered_types:
-        labels = ordered_types
-        x = np.arange(len(labels))
+        plot_labels = plot_ordered_types
+        x = np.arange(len(plot_labels))
         width = 0.38
-        trans_labels = [base_ana_cfg['labels'][v] for v in ordered_types]
-        trans_colors = [base_ana_cfg['colors'][v] for v in ordered_types]
-        rot_labels = [base_ana_cfg['labels'][v] for v in ordered_types]
-        rot_colors = [base_ana_cfg['colors'][v] for v in ordered_types]
+        trans_labels = [_plot_legend_label(v, base_ana_cfg) for v in plot_labels]
+        trans_colors = [base_ana_cfg['colors'][v] for v in plot_labels]
+        rot_labels = [_plot_legend_label(v, base_ana_cfg) for v in plot_labels]
+        rot_colors = [base_ana_cfg['colors'][v] for v in plot_labels]
 
         for mode in ('finite', 'original', 'penalized'):
             out_dirs = mode_out_dirs[mode]
@@ -1257,8 +1632,10 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                     ax.set_ylabel('non-registered ratio')
                     ax.set_ylim(0, 1.05)
                     _annotate_bar_values(ax, bars)
+                    fig_reg.suptitle('Registration failure rate{}'.format(ms), fontsize=12, y=0.98)
                     _finalize_reg_bar_plot(fig_reg, ax, reg_labels)
-                    reg_plot_fn = os.path.join(out_dir, 'registration_stats{}.png'.format(plot_suffix))
+                    fig_reg.subplots_adjust(top=0.88)
+                    reg_plot_fn = os.path.join(out_dir, 'registration_stats{}.png'.format(plot_suffix + png_fs))
                     _save_png(fig_reg, reg_plot_fn, pad=0.25, dpi=300)
 
                 # Under-threshold stats.
@@ -1286,7 +1663,7 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
 
                 trans_ratios = []
                 rot_ratios = []
-                for k in labels:
+                for k in plot_labels:
                     t_vals = _mode_values(acc_trans_e.get(k, []), mode, plot_max_trans_e, penalty_trans)
                     r_vals = _mode_values(acc_rot_e.get(k, []), mode, plot_max_rot_e, penalty_rot)
                     t_ratio, _, _ = _ratio_under_threshold(
@@ -1295,20 +1672,23 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                         r_vals, under_rot_thresh, include_nan=False)
                     trans_ratios.append(t_ratio)
                     rot_ratios.append(r_ratio)
-                trans_plot = [0.0 if not math.isfinite(v) else v for v in trans_ratios]
-                rot_plot = [0.0 if not math.isfinite(v) else v for v in rot_ratios]
-                fig_thr = plt.figure(figsize=(12, 5))
-                ax_thr = fig_thr.add_subplot(111)
-                bars_t = ax_thr.bar(x - width / 2.0, trans_plot, width, label='pos < 1m', color='#4c72b0')
-                bars_r = ax_thr.bar(x + width / 2.0, rot_plot, width, label='rot < 10deg', color='#dd8452')
-                ax_thr.set_ylabel('ratio under threshold')
-                ax_thr.set_ylim(0, 1.05)
-                ax_thr.legend(loc='upper right', fontsize='small')
-                _annotate_bar_values(ax_thr, bars_t, as_percent=True)
-                _annotate_bar_values(ax_thr, bars_r, as_percent=True)
-                _finalize_reg_bar_plot(fig_thr, ax_thr, labels)
-                thr_plot_fn = os.path.join(out_dir, 'overall_under_threshold{}.png'.format(plot_suffix))
-                _save_png(fig_thr, thr_plot_fn, pad=0.25, dpi=300)
+                if plot_labels:
+                    trans_plot = [0.0 if not math.isfinite(v) else v for v in trans_ratios]
+                    rot_plot = [0.0 if not math.isfinite(v) else v for v in rot_ratios]
+                    fig_thr = plt.figure(figsize=(12, 5))
+                    ax_thr = fig_thr.add_subplot(111)
+                    bars_t = ax_thr.bar(x - width / 2.0, trans_plot, width, label='pos < 1m', color='#4c72b0')
+                    bars_r = ax_thr.bar(x + width / 2.0, rot_plot, width, label='rot < 10deg', color='#dd8452')
+                    ax_thr.set_ylabel('ratio under threshold')
+                    ax_thr.set_ylim(0, 1.05)
+                    ax_thr.legend(loc='upper right', fontsize='small')
+                    _annotate_bar_values(ax_thr, bars_t, as_percent=True)
+                    _annotate_bar_values(ax_thr, bars_r, as_percent=True)
+                    fig_thr.suptitle('Ratio under threshold{}'.format(ms), fontsize=12, y=0.98)
+                    _finalize_reg_bar_plot(fig_thr, ax_thr, trans_labels)
+                    fig_thr.subplots_adjust(top=0.88)
+                    thr_plot_fn = os.path.join(out_dir, 'overall_under_threshold{}.png'.format(plot_suffix + png_fs))
+                    _save_png(fig_thr, thr_plot_fn, pad=0.25, dpi=300)
 
                 # Max errors.
                 max_fn = os.path.join(out_dir, 'overall_max_errors{}.csv'.format(plot_suffix))
@@ -1321,25 +1701,34 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                             _fmt_stat(r_stats_m[k]['max']),
                         ))
 
-                t_max_plot = [0.0 if not math.isfinite(t_stats_m[k]['max']) else t_stats_m[k]['max'] for k in labels]
-                r_max_plot = [0.0 if not math.isfinite(r_stats_m[k]['max']) else r_stats_m[k]['max'] for k in labels]
-                fig_max = plt.figure(figsize=(12, 5))
-                ax_max = fig_max.add_subplot(111)
-                bars_tm = ax_max.bar(x - width / 2.0, t_max_plot, width, label='max pos (m)', color='#4c72b0')
-                bars_rm = ax_max.bar(x + width / 2.0, r_max_plot, width, label='max rot (deg)', color='#dd8452')
-                ax_max.set_ylabel('max error{}'.format(' (penalized)' if mode == 'penalized' else '' if mode == 'finite' else ' (original)'))
-                ax_max.legend(loc='upper right', fontsize='small')
-                _annotate_bar_values(ax_max, bars_tm)
-                _annotate_bar_values(ax_max, bars_rm)
-                _finalize_reg_bar_plot(fig_max, ax_max, labels)
-                max_plot_fn = os.path.join(out_dir, 'overall_max_errors{}.png'.format(plot_suffix))
-                _save_png(fig_max, max_plot_fn, pad=0.25, dpi=300)
+                if plot_labels:
+                    t_max_plot = [
+                        0.0 if not math.isfinite(t_stats_m[k]['max']) else t_stats_m[k]['max']
+                        for k in plot_labels
+                    ]
+                    r_max_plot = [
+                        0.0 if not math.isfinite(r_stats_m[k]['max']) else r_stats_m[k]['max']
+                        for k in plot_labels
+                    ]
+                    fig_max = plt.figure(figsize=(12, 5))
+                    ax_max = fig_max.add_subplot(111)
+                    bars_tm = ax_max.bar(x - width / 2.0, t_max_plot, width, label='max pos (m)', color='#4c72b0')
+                    bars_rm = ax_max.bar(x + width / 2.0, r_max_plot, width, label='max rot (deg)', color='#dd8452')
+                    ax_max.set_ylabel('max error{}'.format(' (penalized)' if mode == 'penalized' else '' if mode == 'finite' else ' (original)'))
+                    ax_max.legend(loc='upper right', fontsize='small')
+                    _annotate_bar_values(ax_max, bars_tm)
+                    _annotate_bar_values(ax_max, bars_rm)
+                    fig_max.suptitle('Max TE and RE{}'.format(ms), fontsize=12, y=0.98)
+                    _finalize_reg_bar_plot(fig_max, ax_max, trans_labels)
+                    fig_max.subplots_adjust(top=0.88)
+                    max_plot_fn = os.path.join(out_dir, 'overall_max_errors{}.png'.format(plot_suffix + png_fs))
+                    _save_png(fig_max, max_plot_fn, pad=0.25, dpi=300)
 
                 # Paper-style max plot with label tweaks (saved once per mode dir).
                 if out_dir == mode_dirs.get(mode):
                     paper_dir = os.path.join(out_dir, 'paper_figs')
                     os.makedirs(paper_dir, exist_ok=True)
-                    paper_keys = ordered_types
+                    paper_keys = plot_ordered_types
                     if paper_keys:
                         paper_labels = [_paper_label(k, base_ana_cfg) for k in paper_keys]
                         paper_x = np.arange(len(paper_labels))
@@ -1361,14 +1750,19 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                             paper_x + width / 2.0, paper_r_max, width,
                             label='max rot (deg)', color='#dd8452', alpha=0.90, edgecolor='none'
                         )
-                        ax_pmax.set_ylabel('max error', fontsize=13)
+                        ax_pmax.set_ylabel('max error', fontsize=PAPER_YLABEL_FONTSIZE)
                         _style_paper_axes(ax_pmax)
-                        ax_pmax.legend(loc='upper right', fontsize=10, frameon=False)
+                        ax_pmax.legend(loc='upper right', fontsize=11, frameon=False)
                         _annotate_bar_values(ax_pmax, bars_tm, fmt="{:.2f}", fontsize=10)
                         _annotate_bar_values(ax_pmax, bars_rm, fmt="{:.2f}", fontsize=10)
+                        fig_pmax.suptitle(
+                            'Max translation and rotation error{}'.format(ms),
+                            fontsize=PAPER_SUPTITLE_FONTSIZE, y=1.02,
+                        )
                         _finalize_paper_bar_plot(fig_pmax, ax_pmax, paper_labels)
+                        fig_pmax.subplots_adjust(top=0.86)
                         paper_plot_fn = os.path.join(
-                            paper_dir, 'overall_max_errors{}.png'.format(plot_suffix)
+                            paper_dir, 'overall_max_errors{}.png'.format(plot_suffix + png_fs)
                         )
                         _save_png(fig_pmax, paper_plot_fn, pad=0.20, dpi=300)
 
@@ -1387,43 +1781,60 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                             r_stats_m[k]['count'],
                         ))
 
-                fig_ms = plt.figure(figsize=(12, 6))
-                axes_ms = fig_ms.subplots(2, 1, sharex=True)
-                ax_ms_t, ax_ms_r = axes_ms[0], axes_ms[1]
-                t_means = [t_stats_m[k]['mean'] if math.isfinite(t_stats_m[k]['mean']) else 0.0 for k in labels]
-                t_stds = [t_stats_m[k].get('std', float('nan')) if math.isfinite(t_stats_m[k].get('std', float('nan'))) else 0.0 for k in labels]
-                r_means = [r_stats_m[k]['mean'] if math.isfinite(r_stats_m[k]['mean']) else 0.0 for k in labels]
-                r_stds = [r_stats_m[k].get('std', float('nan')) if math.isfinite(r_stats_m[k].get('std', float('nan'))) else 0.0 for k in labels]
-                ax_ms_t.bar(x, t_means, color='#4c72b0', alpha=0.90, edgecolor='none', zorder=2)
-                ax_ms_r.bar(x, r_means, color='#dd8452', alpha=0.90, edgecolor='none', zorder=2)
-                ax_ms_t.errorbar(
-                    x, t_means, yerr=t_stds, fmt='none', ecolor='#333333',
-                    elinewidth=1.6, capsize=4, capthick=1.2, zorder=3
-                )
-                ax_ms_r.errorbar(
-                    x, r_means, yerr=r_stds, fmt='none', ecolor='#333333',
-                    elinewidth=1.6, capsize=4, capthick=1.2, zorder=3
-                )
-                ax_ms_t.set_ylabel('pos mean ± std')
-                ax_ms_r.set_ylabel('rot mean ± std')
-                ax_ms_r.set_xlabel('variation')
-                ax_ms_t.grid(axis='y', alpha=0.25, linewidth=0.6)
-                ax_ms_r.grid(axis='y', alpha=0.25, linewidth=0.6)
-                t_lim = max([m + s for m, s in zip(t_means, t_stds) if math.isfinite(m + s)] + [0.0])
-                r_lim = max([m + s for m, s in zip(r_means, r_stds) if math.isfinite(m + s)] + [0.0])
-                if t_lim > 0.0:
-                    ax_ms_t.set_ylim(0.0, t_lim * 1.1)
-                if r_lim > 0.0:
-                    ax_ms_r.set_ylim(0.0, r_lim * 1.1)
-                _finalize_two_row_plot(fig_ms, ax_ms_r, labels)
-                ms_plot_fn = os.path.join(out_dir, 'overall_mean_std_errors{}.png'.format(plot_suffix))
-                _save_png(fig_ms, ms_plot_fn, pad=0.25, dpi=300)
+                if plot_labels:
+                    fig_ms = plt.figure(figsize=(12, 6))
+                    axes_ms = fig_ms.subplots(2, 1, sharex=True)
+                    ax_ms_t, ax_ms_r = axes_ms[0], axes_ms[1]
+                    t_means = [
+                        t_stats_m[k]['mean'] if math.isfinite(t_stats_m[k]['mean']) else 0.0
+                        for k in plot_labels
+                    ]
+                    t_stds = [
+                        t_stats_m[k].get('std', float('nan'))
+                        if math.isfinite(t_stats_m[k].get('std', float('nan'))) else 0.0
+                        for k in plot_labels
+                    ]
+                    r_means = [
+                        r_stats_m[k]['mean'] if math.isfinite(r_stats_m[k]['mean']) else 0.0
+                        for k in plot_labels
+                    ]
+                    r_stds = [
+                        r_stats_m[k].get('std', float('nan'))
+                        if math.isfinite(r_stats_m[k].get('std', float('nan'))) else 0.0
+                        for k in plot_labels
+                    ]
+                    ax_ms_t.bar(x, t_means, color='#4c72b0', alpha=0.90, edgecolor='none', zorder=2)
+                    ax_ms_r.bar(x, r_means, color='#dd8452', alpha=0.90, edgecolor='none', zorder=2)
+                    ax_ms_t.errorbar(
+                        x, t_means, yerr=t_stds, fmt='none', ecolor='#333333',
+                        elinewidth=1.6, capsize=4, capthick=1.2, zorder=3
+                    )
+                    ax_ms_r.errorbar(
+                        x, r_means, yerr=r_stds, fmt='none', ecolor='#333333',
+                        elinewidth=1.6, capsize=4, capthick=1.2, zorder=3
+                    )
+                    ax_ms_t.set_ylabel('pos mean ± std')
+                    ax_ms_r.set_ylabel('rot mean ± std')
+                    ax_ms_r.set_xlabel('variation')
+                    ax_ms_t.grid(axis='y', alpha=0.25, linewidth=0.6)
+                    ax_ms_r.grid(axis='y', alpha=0.25, linewidth=0.6)
+                    t_lim = max([m + s for m, s in zip(t_means, t_stds) if math.isfinite(m + s)] + [0.0])
+                    r_lim = max([m + s for m, s in zip(r_means, r_stds) if math.isfinite(m + s)] + [0.0])
+                    if t_lim > 0.0:
+                        ax_ms_t.set_ylim(0.0, t_lim * 1.1)
+                    if r_lim > 0.0:
+                        ax_ms_r.set_ylim(0.0, r_lim * 1.1)
+                    fig_ms.suptitle('Mean ± std (TE / RE){}'.format(ms), fontsize=12, y=0.98)
+                    _finalize_two_row_plot(fig_ms, ax_ms_r, trans_labels)
+                    fig_ms.subplots_adjust(top=0.90)
+                    ms_plot_fn = os.path.join(out_dir, 'overall_mean_std_errors{}.png'.format(plot_suffix + png_fs))
+                    _save_png(fig_ms, ms_plot_fn, pad=0.25, dpi=300)
 
-                # Paper-style plot: average of pos/rot means, no along_path, labeled bars.
+                # Paper-style plot: average of pos/rot means, labeled bars.
                 if out_dir == mode_dirs.get(mode):
                     paper_dir = os.path.join(out_dir, 'paper_figs')
                     os.makedirs(paper_dir, exist_ok=True)
-                    paper_keys = [k for k in ordered_types if k != 'along_path']
+                    paper_keys = list(plot_ordered_types)
                     if paper_keys:
                         paper_labels = [_paper_label(k, base_ana_cfg) for k in paper_keys]
                         paper_vals = []
@@ -1436,12 +1847,17 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                             range(len(paper_labels)), paper_vals,
                             color='#4c72b0', alpha=0.90, edgecolor='none'
                         )
-                        ax_paper.set_ylabel('avg. mean error (pos/rot)', fontsize=13)
+                        ax_paper.set_ylabel('avg. mean error (pos/rot)', fontsize=PAPER_YLABEL_FONTSIZE)
                         _style_paper_axes(ax_paper)
                         _annotate_bar_values(ax_paper, bars, fmt="{:.2f}", fontsize=11)
+                        fig_paper.suptitle(
+                            'Average mean error (TE / RE){}'.format(ms),
+                            fontsize=PAPER_SUPTITLE_FONTSIZE, y=1.02,
+                        )
                         _finalize_paper_bar_plot(fig_paper, ax_paper, paper_labels)
+                        fig_paper.subplots_adjust(top=0.86)
                         paper_plot_fn = os.path.join(
-                            paper_dir, 'overall_mean_std_errors{}.png'.format(plot_suffix)
+                            paper_dir, 'overall_mean_std_errors{}.png'.format(plot_suffix + png_fs)
                         )
                         _save_png(fig_paper, paper_plot_fn, pad=0.20, dpi=300)
 
@@ -1472,104 +1888,231 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
 
                         fig_combo, axes_combo = plt.subplots(3, 1, sharex=True, figsize=(10.5, 7.5))
                         ax_te, ax_re, ax_norm = axes_combo
+                        ax_te.tick_params(axis='x', labelbottom=False)
+                        ax_re.tick_params(axis='x', labelbottom=False)
                         x_combo = np.arange(len(paper_labels))
 
                         bars_te = ax_te.bar(
                             x_combo, te_means, color='#4c72b0', alpha=0.90, edgecolor='none'
                         )
-                        ax_te.set_ylabel('TE mean (m)', fontsize=12)
+                        ax_te.set_ylabel('TE mean (m)', fontsize=PAPER_YLABEL_FONTSIZE)
                         _style_paper_axes(ax_te)
-                        _annotate_bar_values(ax_te, bars_te, fmt="{:.2f}", fontsize=9)
+                        _annotate_bar_values(ax_te, bars_te, fmt="{:.2f}", fontsize=10)
 
                         bars_re = ax_re.bar(
                             x_combo, re_means, color='#dd8452', alpha=0.90, edgecolor='none'
                         )
-                        ax_re.set_ylabel('RE mean (deg)', fontsize=12)
+                        ax_re.set_ylabel('RE mean (deg)', fontsize=PAPER_YLABEL_FONTSIZE)
                         _style_paper_axes(ax_re)
-                        _annotate_bar_values(ax_re, bars_re, fmt="{:.2f}", fontsize=9)
+                        _annotate_bar_values(ax_re, bars_re, fmt="{:.2f}", fontsize=10)
 
                         bars_norm = ax_norm.bar(
                             x_combo, norm_vals, color='#55a868', alpha=0.90, edgecolor='none'
                         )
-                        ax_norm.set_ylabel('norm. avg error', fontsize=12)
+                        ax_norm.set_ylabel('norm. avg error', fontsize=PAPER_YLABEL_FONTSIZE)
                         _style_paper_axes(ax_norm)
-                        _annotate_bar_values(ax_norm, bars_norm, fmt="{:.2f}", fontsize=9)
-                        ax_norm.set_xticks(range(len(paper_labels)))
-                        ax_norm.set_xticklabels(
-                            paper_labels, rotation=30, ha='right', rotation_mode='anchor', fontsize=12
-                        )
+                        _annotate_bar_values(ax_norm, bars_norm, fmt="{:.2f}", fontsize=10)
+                        _set_paper_column_ticklabels(ax_norm, paper_labels)
 
+                        fig_combo.suptitle(
+                            'TE, RE, and normalized mean error{}'.format(ms),
+                            fontsize=PAPER_SUPTITLE_FONTSIZE, y=0.995,
+                        )
                         fig_combo.tight_layout()
-                        fig_combo.subplots_adjust(left=0.18, bottom=0.22, hspace=0.22)
+                        fig_combo.subplots_adjust(left=0.20, bottom=0.26, hspace=0.28, top=0.93)
                         combo_plot_fn = os.path.join(
-                            paper_dir, 'overall_te_re_avg_norm{}.png'.format(plot_suffix)
+                            paper_dir, 'overall_te_re_avg_norm{}.png'.format(plot_suffix + png_fs)
                         )
                         _save_png(fig_combo, combo_plot_fn, pad=0.20, dpi=300)
 
+                        # Registration failure table (paper_figs, finite mode only).
+                        if mode == 'finite':
+                            per_map = per_cfg_map_by_mode.get('finite', {})
+                            table_cols = ['cfg'] + paper_labels
+                            table_rows = []
+                            for cfg_name in cfg_nms:
+                                cfg_label = cfg_name.replace('_', ' ').title()
+                                row = [cfg_label]
+                                for k in paper_keys:
+                                    entry = per_map.get((cfg_name, k))
+                                    if not entry:
+                                        row.append('—')
+                                        continue
+                                    total = entry.get('total', 0)
+                                    ratio = entry.get('nan_ratio', float('nan'))
+                                    if total <= 0:
+                                        row.append('X')
+                                    elif not math.isfinite(ratio):
+                                        row.append('—')
+                                    else:
+                                        row.append('{:.0f}%'.format(ratio * 100.0))
+                                table_rows.append(row)
+
+                            fig_tbl = plt.figure(
+                                figsize=(max(8.0, 1.1 * len(table_cols)), 0.55 * len(table_rows) + 1.6)
+                            )
+                            ax_tbl = fig_tbl.add_subplot(111)
+                            ax_tbl.axis('off')
+                            tbl = ax_tbl.table(
+                                cellText=table_rows,
+                                colLabels=table_cols,
+                                loc='center',
+                                cellLoc='center'
+                            )
+                            tbl.auto_set_font_size(False)
+                            tbl.scale(1.0, 1.28)
+                            fig_tbl.suptitle(
+                                'Registration failure rate{}'.format(ms),
+                                fontsize=PAPER_SUPTITLE_FONTSIZE, y=0.995,
+                            )
+                            for (row_i, col_i), cell in tbl.get_celld().items():
+                                cell.set_linewidth(0.4)
+                                cell.set_edgecolor('#444444')
+                                if row_i == 0:
+                                    cell.set_text_props(
+                                        weight='bold', fontsize=PAPER_COL_FONTSIZE
+                                    )
+                                else:
+                                    cell.set_text_props(fontsize=11)
+                            _finalize_table_plot(fig_tbl)
+                            fig_tbl.subplots_adjust(top=0.92)
+                            table_plot_fn = os.path.join(
+                                paper_dir, 'registration_failure_table{}.png'.format(plot_suffix + png_fs)
+                            )
+                            _save_png(fig_tbl, table_plot_fn, pad=0.20, dpi=300)
+
                 # Table view with numeric values.
-                fig_tbl = plt.figure(figsize=(12, max(2.5, 0.35 * len(labels) + 1.5)))
-                ax_tbl = fig_tbl.add_subplot(111)
-                ax_tbl.axis('off')
-                cell_text = []
-                for k in labels:
-                    cell_text.append([
-                        _fmt_stat(t_stats_m[k]['mean']),
-                        _fmt_stat(t_stats_m[k].get('std', float('nan'))),
-                        _fmt_stat(r_stats_m[k]['mean']),
-                        _fmt_stat(r_stats_m[k].get('std', float('nan'))),
-                        str(t_stats_m[k]['count']),
-                        str(r_stats_m[k]['count']),
-                    ])
-                col_labels = ['pos_mean', 'pos_std', 'rot_mean', 'rot_std', 'pos_n', 'rot_n']
-                table = ax_tbl.table(cellText=cell_text, colLabels=col_labels,
-                                     rowLabels=labels, loc='center')
-                table.auto_set_font_size(False)
-                table.set_fontsize(9)
-                table.scale(1.0, 1.2)
-                _finalize_table_plot(fig_tbl)
-                tbl_plot_fn = os.path.join(out_dir, 'overall_mean_std_table{}.png'.format(plot_suffix))
-                _save_png(fig_tbl, tbl_plot_fn, pad=0.25, dpi=300)
+                if plot_labels:
+                    fig_tbl = plt.figure(figsize=(12, max(2.5, 0.35 * len(plot_labels) + 1.5)))
+                    fig_tbl.suptitle('Mean ± std (numeric){}'.format(ms), fontsize=12, y=0.98)
+                    ax_tbl = fig_tbl.add_subplot(111)
+                    ax_tbl.axis('off')
+                    cell_text = []
+                    row_labels_disp = [_plot_legend_label(k, base_ana_cfg) for k in plot_labels]
+                    for k in plot_labels:
+                        cell_text.append([
+                            _fmt_stat(t_stats_m[k]['mean']),
+                            _fmt_stat(t_stats_m[k].get('std', float('nan'))),
+                            _fmt_stat(r_stats_m[k]['mean']),
+                            _fmt_stat(r_stats_m[k].get('std', float('nan'))),
+                            str(t_stats_m[k]['count']),
+                            str(r_stats_m[k]['count']),
+                        ])
+                    col_labels = ['pos_mean', 'pos_std', 'rot_mean', 'rot_std', 'pos_n', 'rot_n']
+                    table = ax_tbl.table(cellText=cell_text, colLabels=col_labels,
+                                         rowLabels=row_labels_disp, loc='center')
+                    table.auto_set_font_size(False)
+                    table.set_fontsize(9)
+                    table.scale(1.0, 1.2)
+                    _finalize_table_plot(fig_tbl)
+                    fig_tbl.subplots_adjust(top=0.90)
+                    tbl_plot_fn = os.path.join(out_dir, 'overall_mean_std_table{}.png'.format(plot_suffix + png_fs))
+                    _save_png(fig_tbl, tbl_plot_fn, pad=0.25, dpi=300)
 
-                # Overall histogram (CDF) with mode-specific NaN handling.
-                trans_errors = [_mode_values(acc_trans_e.get(v, []), mode, plot_max_trans_e, penalty_trans)
-                                for v in ordered_types]
-                rot_errors = [_mode_values(acc_rot_e.get(v, []), mode, plot_max_rot_e, penalty_rot)
-                              for v in ordered_types]
+                    # Overall histogram (CDF) with mode-specific NaN handling.
+                    trans_errors = [_mode_values(acc_trans_e.get(v, []), mode, plot_max_trans_e, penalty_trans)
+                                    for v in plot_ordered_types]
+                    rot_errors = [_mode_values(acc_rot_e.get(v, []), mode, plot_max_rot_e, penalty_rot)
+                                  for v in plot_ordered_types]
 
-                fig = plt.figure(figsize=(12, 6))
-                axes = fig.subplots(1, 2, sharey=True)
-                pos_ax, rot_ax = axes[0], axes[1]
-                for idx, v in enumerate(ordered_types):
-                    pos_ax.hist(trans_errors[idx], label=trans_labels[idx], bins=50,
-                                color=trans_colors[idx], linestyle=base_ana_cfg['linestyles'][v],
-                                density=True, histtype='step', cumulative=True,
-                                range=(0, plot_max_trans_e))
-                    rot_ax.hist(rot_errors[idx], label=rot_labels[idx], bins=50,
-                                color=rot_colors[idx], linestyle=base_ana_cfg['linestyles'][v],
-                                density=True, histtype='step', cumulative=True,
-                                range=(0, plot_max_rot_e))
-                pos_ax.set_xlabel('Position error (m)')
-                rot_ax.set_xlabel('Rotation error (deg)')
+                    fig = plt.figure(figsize=(12, 6))
+                    fig.suptitle('CDF of pose errors{}'.format(ms), fontsize=12, y=0.98)
+                    axes = fig.subplots(1, 2, sharey=True)
+                    pos_ax, rot_ax = axes[0], axes[1]
+                    for idx, v in enumerate(plot_ordered_types):
+                        pos_ax.hist(trans_errors[idx], label=trans_labels[idx], bins=50,
+                                    color=trans_colors[idx], linestyle=base_ana_cfg['linestyles'][v],
+                                    density=True, histtype='step', cumulative=True,
+                                    range=(0, plot_max_trans_e))
+                        rot_ax.hist(rot_errors[idx], label=rot_labels[idx], bins=50,
+                                    color=rot_colors[idx], linestyle=base_ana_cfg['linestyles'][v],
+                                    density=True, histtype='step', cumulative=True,
+                                    range=(0, plot_max_rot_e))
+                    pos_ax.set_xlabel('Position error (m)')
+                    rot_ax.set_xlabel('Rotation error (deg)')
 
-                pos_ax.set_xlim([0, base_ana_cfg['hist_max_trans_e']])
-                pos_ax.set_ylim([args.plt_min_ratio, args.plt_max_ratio + 0.01])
+                    pos_ax.set_xlim([0, base_ana_cfg['hist_max_trans_e']])
+                    pos_ax.set_ylim([args.plt_min_ratio, args.plt_max_ratio + 0.01])
 
-                rot_ax.set_xlim([0, base_ana_cfg['hist_max_rot_e']])
-                rot_ax.set_ylim([args.plt_min_ratio, args.plt_max_ratio + 0.01])
+                    rot_ax.set_xlim([0, base_ana_cfg['hist_max_rot_e']])
+                    rot_ax.set_ylim([args.plt_min_ratio, args.plt_max_ratio + 0.01])
 
-                ystep = (args.plt_max_ratio- args.plt_min_ratio) / 4.0
-                y_ticks = np.arange(args.plt_min_ratio, args.plt_max_ratio + 0.001, ystep)
-                y_ticklabels = ['{}%'.format(int(v * 100)) for v in y_ticks]
+                    ystep = (args.plt_max_ratio- args.plt_min_ratio) / 4.0
+                    y_ticks = np.arange(args.plt_min_ratio, args.plt_max_ratio + 0.001, ystep)
+                    y_ticklabels = ['{}%'.format(int(v * 100)) for v in y_ticks]
 
-                pos_ax.set_yticks(y_ticks)
-                pos_ax.set_yticklabels(y_ticklabels)
+                    pos_ax.set_yticks(y_ticks)
+                    pos_ax.set_yticklabels(y_ticklabels)
 
-                if args.legend:
-                    plt.legend(loc='lower right', ncol=2, fontsize='small')
+                    if args.legend:
+                        plt.legend(loc='lower right', ncol=2, fontsize='small')
 
-                fig.tight_layout()
-                overall_hist_fn = os.path.join(out_dir, 'overall_hist{}.png'.format(plot_suffix))
-                _save_png(fig, overall_hist_fn, pad=0.25, dpi=300)
+                    fig.tight_layout()
+                    fig.subplots_adjust(top=0.88)
+                    overall_hist_fn = os.path.join(out_dir, 'overall_hist{}.png'.format(plot_suffix + png_fs))
+                    _save_png(fig, overall_hist_fn, pad=0.25, dpi=300)
+
+                    # Violin distributions (per-pose TE/RE) — clearer than mean±std for skewed errors.
+                    # Omit "none" (No Info.) so violins focus on informative planners + ours.
+                    violin_types = [t for t in plot_ordered_types if t != 'none']
+                    trans_violin = [
+                        _mode_values(acc_trans_e.get(v, []), mode, plot_max_trans_e, penalty_trans)
+                        for v in violin_types
+                    ]
+                    rot_violin = [
+                        _mode_values(acc_rot_e.get(v, []), mode, plot_max_rot_e, penalty_rot)
+                        for v in violin_types
+                    ]
+                    violin_labels = [_plot_legend_label(v, base_ana_cfg) for v in violin_types]
+                    violin_colors = [base_ana_cfg['colors'][v] for v in violin_types]
+                    if violin_types:
+                        fig_v = plt.figure(figsize=(15.0, 5.7))
+                        ax_vt = fig_v.add_subplot(121)
+                        ax_vr = fig_v.add_subplot(122)
+                        _plot_violin_panel(
+                            ax_vt, trans_violin, violin_labels, violin_colors,
+                            'Translation error (m)', ylim=VIOLIN_YLIM_TE,
+                        )
+                        _plot_violin_panel(
+                            ax_vr, rot_violin, violin_labels, violin_colors,
+                            'Rotation error (deg)', ylim=VIOLIN_YLIM_RE,
+                        )
+                        fig_v.suptitle(
+                            'TE and RE distributions over all poses{}'.format(ms),
+                            fontsize=VIOLIN_SUPTITLE_FONTSIZE, y=VIOLIN_SUPTITLE_Y, fontweight='semibold',
+                        )
+                        _finalize_violin_figure(fig_v, bottom_pad=0.34)
+                        violin_fn = os.path.join(out_dir, 'overall_te_re_violins{}.png'.format(plot_suffix + png_fs))
+                        _save_png(fig_v, violin_fn, pad=0.20, dpi=300)
+                        if out_dir == mode_dirs.get(mode):
+                            paper_dir_v = os.path.join(out_dir, 'paper_figs')
+                            os.makedirs(paper_dir_v, exist_ok=True)
+                            paper_vlabels = [_paper_label(k, base_ana_cfg) for k in violin_types]
+                            fig_vp = plt.figure(figsize=(15.0, 5.7))
+                            ax_vpt = fig_vp.add_subplot(121)
+                            ax_vpr = fig_vp.add_subplot(122)
+                            _plot_violin_panel(
+                                ax_vpt, trans_violin, paper_vlabels, violin_colors,
+                                'Translation error (m)',
+                                ylim=VIOLIN_YLIM_TE,
+                            )
+                            _plot_violin_panel(
+                                ax_vpr, rot_violin, paper_vlabels, violin_colors,
+                                'Rotation error (deg)',
+                                ylim=VIOLIN_YLIM_RE,
+                            )
+                            fig_vp.suptitle(
+                                'TE and RE distributions over all poses{}'.format(ms),
+                                fontsize=VIOLIN_SUPTITLE_FONTSIZE, y=VIOLIN_SUPTITLE_Y, fontweight='semibold',
+                            )
+                            _finalize_violin_figure(fig_vp, bottom_pad=0.36)
+                            _save_png(
+                                fig_vp,
+                                os.path.join(paper_dir_v, 'overall_te_re_violins{}.png'.format(plot_suffix + png_fs)),
+                                pad=0.20, dpi=300,
+                            )
+                            plt.close(fig_vp)
+                        plt.close(fig_v)
 
                 # Combined per-config plot (nan %, mean/std) across all cfgs and variations.
                 per_map = per_cfg_map_by_mode.get(mode, {})
@@ -1580,12 +2123,14 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                     t_stds_cfg = []
                     r_means_cfg = []
                     r_stds_cfg = []
-                    for v in ordered_types:
+                    for v in plot_ordered_types:
                         for cfg_name in cfg_nms:
                             row = per_map.get((cfg_name, v))
                             if row is None:
                                 continue
-                            labels_cfg.append(f"{v}/{cfg_name}")
+                            labels_cfg.append(
+                                "{}/{}".format(_plot_legend_label(v, base_ana_cfg), cfg_name)
+                            )
                             nan_vals.append(0.0 if not math.isfinite(row['nan_ratio']) else row['nan_ratio'])
                             t_means_cfg.append(0.0 if not math.isfinite(row['trans_mean']) else row['trans_mean'])
                             t_stds_cfg.append(0.0 if not math.isfinite(row['trans_std']) else row['trans_std'])
@@ -1609,8 +2154,13 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                         ax_rm.set_ylabel('rot mean ± std')
                         ax_rm.set_xlabel('cfg / variation')
 
+                        fig_cfg.suptitle(
+                            'Per-trajectory and variation summary{}'.format(ms),
+                            fontsize=12, y=0.995,
+                        )
                         _finalize_long_x_plot(fig_cfg, ax_rm, labels_cfg)
-                        per_cfg_plot_fn = os.path.join(out_dir, 'overall_per_cfg_summary{}.png'.format(plot_suffix))
+                        fig_cfg.subplots_adjust(top=0.94)
+                        per_cfg_plot_fn = os.path.join(out_dir, 'overall_per_cfg_summary{}.png'.format(plot_suffix + png_fs))
                         _save_png(fig_cfg, per_cfg_plot_fn, pad=0.25, dpi=300)
 
 
@@ -1627,6 +2177,26 @@ if __name__ == '__main__':
     parser.add_argument('--no_legend', action='store_false', dest='legend')
     parser.add_argument('--plt_min_ratio', type=float, default=0.0)
     parser.add_argument('--plt_max_ratio', type=float, default=1.0)
+    parser.add_argument(
+        '--map-label',
+        type=str,
+        default=None,
+        dest='map_label',
+        help='Short map tag in figure titles (default: strip trace_ from top_dir, e.g. trace_r1_a30 → r1_a30)',
+    )
+    parser.add_argument(
+        '--merge_optimized_from',
+        type=str,
+        default=None,
+        help='Second trace root that contains .../optimized_path_yaw (e.g. traj_opt_xyz when top_dir is traj_opt).',
+    )
+    parser.add_argument(
+        '--analysis_artifacts_dir',
+        type=str,
+        default=None,
+        dest='analysis_artifacts_dir',
+        help='Where to write analysis_outputs/, overall_*.csv|png, and base_analysis_cfg copy (default: top_dir).',
+    )
     add_wandb_args(parser)
     parser.set_defaults(multiple=False, legend=True)
     args = parser.parse_args()
@@ -1639,12 +2209,18 @@ if __name__ == '__main__':
 
     base_ana_cfg = None
     assert os.path.exists(args.base_ana_cfg)
-    shutil.copy2(args.base_ana_cfg, os.path.join(args.top_dir, 'base_analysis_cfg.yaml'))
+    args.map_label = _resolve_map_label(args.top_dir, args.map_label)
+    _artifact_parent = os.path.abspath(getattr(args, 'analysis_artifacts_dir', None) or args.top_dir)
+    os.makedirs(_artifact_parent, exist_ok=True)
+    _cfg_dst = os.path.join(_artifact_parent, 'base_analysis_cfg.yaml')
+    if os.path.abspath(args.base_ana_cfg) != os.path.abspath(_cfg_dst):
+        shutil.copy2(args.base_ana_cfg, _cfg_dst)
     with open(args.base_ana_cfg) as f:
         base_ana_cfg = yaml.load(f, Loader=yaml.FullLoader)
     print("Base configuration for analysis is {}".format(base_ana_cfg))
 
-    run_name = os.path.basename(os.path.abspath(args.top_dir))
+    _run_root = getattr(args, 'analysis_artifacts_dir', None) or args.top_dir
+    run_name = os.path.basename(os.path.abspath(_run_root))
     run, wandb_mod = safe_init(
         args,
         config={'top_dir': args.top_dir, 'base_ana_cfg': args.base_ana_cfg,
@@ -1666,6 +2242,8 @@ if __name__ == '__main__':
         if args.multiple:
             _analyzeMultipleCfgs(args.top_dir, base_ana_cfg, args, wandb_mod=wandb_mod)
         else:
-            analyzeSingleCfg(args.top_dir, base_cfg=base_ana_cfg, wandb_mod=wandb_mod)
+            analyzeSingleCfg(
+                args.top_dir, base_cfg=base_ana_cfg, wandb_mod=wandb_mod,
+                map_label=args.map_label)
 
     finish(run)
