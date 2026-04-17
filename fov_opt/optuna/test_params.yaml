@@ -1,0 +1,11 @@
+mode: fixed
+fixed_params:
+  max_iteration: 30
+  ks: 20.0
+  base_step_scale: 0.5
+  min_step_deg: 1.1403537546843645
+  max_step_deg: 4.63420141831698
+  trajectory_jacobian_step: 0.2
+  step_norm_mode: points
+  fov_schedule: 90,45, 15
+study_name: fov_test

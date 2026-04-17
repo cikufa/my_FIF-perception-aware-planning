@@ -1,0 +1,15 @@
+mode: fixed
+fixed_params:
+  ks_transition_deg: 15.9
+  base_step_scale: 2.6592784791660717
+  min_step_deg: 1.883325430679841
+  max_step_deg: 3.7571113087300274
+  trajectory_jacobian_step: 0.13672388108767802
+  step_norm_mode: points
+  fov_schedule: 60,30,15
+  ks: 40.93328581559948
+best_value: 6.348403156578781
+metrics:
+  te: 0.3349178875247237
+  re: 6.0134852690540574
+study_name: fov_optuna_both
