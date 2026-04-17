@@ -19,6 +19,14 @@ Panels:
         - /general_markers1/Namespaces1
         - /rrt_edges1
         - /rrt_edges1/Namespaces1
+        - /rrt_info_heatmap1
+        - /rrt_info_heatmap1/Namespaces1
+        - /rrt_info_path1
+        - /rrt_info_path1/Namespaces1
+        - /rrt_info_camera1
+        - /rrt_info_camera1/Namespaces1
+        - /rrt_info_map_heatmap1
+        - /rrt_info_map_heatmap1/Namespaces1
       Splitter Ratio: 0.376086950302124
     Tree Height: 594
   - Class: rviz/Selection
@@ -312,6 +320,270 @@ Visualization Manager:
       Enabled: true
       Marker Topic: /quad_rrt/rrt_edge
       Name: rrt_edges
+      Namespaces:
+        rrt_edge: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /rrt_start_end_markers
+      Name: rrt_start_end_markers
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /rrt_info_viz/heatmap
+      Name: rrt_info_heatmap
+      Namespaces:
+        rrt_heatmap: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /rrt_info_viz/general_markers
+      Name: rrt_info_path
+      Namespaces:
+        rrt_path: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /rrt_info_viz/camera_marker
+      Name: rrt_info_camera
+      Namespaces:
+        rrt_cam: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /rrt_info_viz/map_heatmap
+      Name: rrt_info_map_heatmap
+      Namespaces:
+        rrt_map_heatmap: true
+      Queue Size: 1
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1
+        Min Value: -1
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 32; 74; 135
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 0
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: traj_pos_gp_info
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 6
+      Size (m): 0.25
+      Style: Boxes
+      Topic: /quad_rrt_gp_info/traj_pos
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /quad_rrt_gp_info/traj_orient
+      Name: traj_orient_gp_info
+      Namespaces:
+        body: false
+        cam: false
+        cam_view: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /quad_rrt_gp_info/general_markers
+      Name: general_markers_gp_info
+      Namespaces:
+        rrt_path: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /quad_rrt_gp_info/rrt_edge
+      Name: rrt_edges_gp_info
+      Namespaces:
+        rrt_edge: true
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1
+        Min Value: -1
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 32; 74; 135
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 0
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: traj_pos_gp_trace
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 6
+      Size (m): 0.25
+      Style: Boxes
+      Topic: /quad_rrt_gp_trace/traj_pos
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /quad_rrt_gp_trace/traj_orient
+      Name: traj_orient_gp_trace
+      Namespaces:
+        body: false
+        cam: false
+        cam_view: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /quad_rrt_gp_trace/general_markers
+      Name: general_markers_gp_trace
+      Namespaces:
+        rrt_path: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /quad_rrt_gp_trace/rrt_edge
+      Name: rrt_edges_gp_trace
+      Namespaces:
+        rrt_edge: true
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1
+        Min Value: -1
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 32; 74; 135
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 0
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: traj_pos_quad_info
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 6
+      Size (m): 0.25
+      Style: Boxes
+      Topic: /quad_rrt_quadratic_info/traj_pos
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /quad_rrt_quadratic_info/traj_orient
+      Name: traj_orient_quad_info
+      Namespaces:
+        body: false
+        cam: false
+        cam_view: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /quad_rrt_quadratic_info/general_markers
+      Name: general_markers_quad_info
+      Namespaces:
+        rrt_path: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /quad_rrt_quadratic_info/rrt_edge
+      Name: rrt_edges_quad_info
+      Namespaces:
+        rrt_edge: true
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 1
+        Min Value: -1
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 32; 74; 135
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 0
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: traj_pos_quad_trace
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 6
+      Size (m): 0.25
+      Style: Boxes
+      Topic: /quad_rrt_quadratic_trace/traj_pos
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /quad_rrt_quadratic_trace/traj_orient
+      Name: traj_orient_quad_trace
+      Namespaces:
+        body: false
+        cam: false
+        cam_view: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /quad_rrt_quadratic_trace/general_markers
+      Name: general_markers_quad_trace
+      Namespaces:
+        rrt_path: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /quad_rrt_quadratic_trace/rrt_edge
+      Name: rrt_edges_quad_trace
       Namespaces:
         rrt_edge: true
       Queue Size: 100

@@ -1,4 +1,5 @@
-# general options
+# xyz-only trajectory optimization: optimize translation only.
+# Yaw stays as the waypoint-seeded polynomial initialization.
 integral_cost_sample_dt: 0.1
 ceres_use_logger: true
 ceres_parameter_tolerance: 1e-8
@@ -9,14 +10,14 @@ viz_every_iter_pause_sec: 0.00
 second_stage_opt_yaw_only: false
 use_info_potential: true
 calculate_info_from_pc: false
+info_metric_type: none
 
 opt_type: Ceres
 
-# trajectory specification
 total_time: 10
 waypoints:
-  - [-4.00, 16.0, 2.0, 0.0]
-  - [-20.00, 50.00, 2.0, 0.0]
+  - [-0.00, 20.0, 2.0, 0.0]
+  - [-20.00, 20.00, 2.0, 0.0]
 num_segments:
   - 5
 T_BC:
@@ -26,11 +27,8 @@ T_BC:
    0, 0, 0, 1 ]
 
 ceres_opt_type: Position
-#  Joint
 ceres_cost:
   - PosDynamic: 0.01
-  # - YawDynamic: 2.0
   - ESDF: 2e4
-  # - Info: 2.0
 
-save_traj_abs_dir: /home/shekoufeh/FIF_ws/src/rpg_information_field/act_map_exp/trace/quad_traj_opt/warehouse_xyz_only
+save_traj_abs_dir: /home/shekoufeh/FIF_ws/src/rpg_information_field/act_map_exp/trace/quad_traj_opt/warehouse_xyz_only/warehouse_side

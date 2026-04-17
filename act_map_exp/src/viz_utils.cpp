@@ -42,7 +42,7 @@ void visualizeTrajectory(const rpg::PoseVec& Twbs,
 
   if (traj_orient_pub.getNumSubscribers() > 0)
   {
-    constexpr size_t kMaxOrientViz = 10u;
+    constexpr size_t kMaxOrientViz = 30u;
     std::vector<size_t> viz_idx;
     if (Twbs.size() < kMaxOrientViz + 1)
     {
@@ -60,6 +60,8 @@ void visualizeTrajectory(const rpg::PoseVec& Twbs,
     for (const size_t idx : viz_idx)
     {
       Twcs.emplace_back(Twbs.at(idx) * Tbc);
+      // Twcs.emplace_back(Twbs.at(idx));
+
     }
 
     visualization_msgs::MarkerArray ma_body;
@@ -74,6 +76,7 @@ void visualizeTrajectory(const rpg::PoseVec& Twbs,
     act_map_ros::rotTransToAxisMarkerArray(Twcs, "cam", vis_scale_base * 0.5,
                                            &ma_cam);
     traj_orient_pub.publish(ma_cam);
+
 
     ros::Time now = ros::Time::now();
     for (size_t idx = 0; idx < Twcs.size(); idx++)

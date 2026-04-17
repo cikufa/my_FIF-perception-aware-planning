@@ -2,9 +2,11 @@
 
 #include "act_map_exp/quad_rrt.h"
 #include <yaml-cpp/yaml.h>
-#include <cmath>
 #include <rpg_common/fs.h>
+#include <rpg_common/timer.h>
 #include <rpg_common_ros/params_helper.h>
+#include <fstream>
+#include <sstream>
 
 #include <ompl/geometric/planners/rrt/RRTstar.h>
 #include "act_map_exp/ompl_utils.h"
@@ -42,6 +44,8 @@ QuadRRT<T>::QuadRRT(const ros::NodeHandle& nh, const ros::NodeHandle& pnh)
 
   clear_rrt_planner_srv_ = this->pnh_.advertiseService(
       "clear_rrt_planner", &QuadRRT::clearRRTPlannerCallback, this);
+  visualize_saved_rrt_srv_ = this->pnh_.advertiseService(
+      "visualize_saved_rrt", &QuadRRT::visualizeSavedRRTCallback, this);
   red_.r = 1.0;
   red_.g = 0.0;
   red_.b = 0.0;
@@ -75,6 +79,9 @@ void QuadRRT<T>::plan()
   final_Twb_vec_.clear();
   consec_lower_than_thresh_cnt_ = 0;
   VLOG(1) << "Start RRT plan.";
+  last_plan_time_sec_ = -1.0;
+  rpg::Timer plan_timer;
+  plan_timer.start();
   const size_t n_iter_prev = rrt_stats_.size();
   for (int cur_iter = 0; cur_iter < max_n_iter_; cur_iter++)
   {
@@ -173,9 +180,6 @@ void QuadRRT<T>::plan()
       {
         VLOG(1) << "Visualize current results...";
         extractRRTPathPoses();
-        VLOG(1) << "pathhhhhhhhhhhhhhhhhhhhhhhhhhh";
-        VLOG(1) << final_Twb_vec_;
-        // std::cout<<"pathhhhhhhhhhhhhhhhhhhhhhhhhhh"<<final_Twb_vec_;
         visualize();
       }
     }
@@ -185,6 +189,8 @@ void QuadRRT<T>::plan()
     }
   }
 
+  last_plan_time_sec_ = plan_timer.stop();
+  LOG(INFO) << "RRT plan time: " << last_plan_time_sec_ << " sec.";
   if (has_valid_solution_)
   {
     VLOG(1) << "Solve successfully!";
@@ -203,10 +209,24 @@ void QuadRRT<T>::extractRRTPathPoses() const
 
   final_Twb_vec_.clear();
   ob::PathPtr path = pdef_->getSolutionPath();
-  path->interpolate(50);   // shekoufeh
+
+  //NOTE:added
+  // Interpolate only when we have a geometric path.
+  ompl::geometric::PathGeometric* geo_path =
+      path->as<ompl::geometric::PathGeometric>();
+  if (geo_path)
+  {
+    geo_path->interpolate(40);  // shekoufeh
+  }
+  else
+  {
+    LOG(WARNING) << "Solution path is not PathGeometric; skip interpolation.";
+    return;
+  }
+
+
   const std::vector<ob::State*>& states =
       path->as<ompl::geometric::PathGeometric>()->getStates();
-
   final_Twb_vec_.reserve(states.size());
   for (const ob::State* s : states)
   {
@@ -229,7 +249,6 @@ void QuadRRT<T>::visualize()
   }
   VLOG(1) << "start visualizaiton...";
   clearMarkerArray(this->traj_orient_pub_);
-  
   visualizeTrajectory(
       final_Twb_vec_, this->traj_pos_pub_, this->traj_orient_pub_, Tbc_,
       Eigen::Vector3d(0.0, 1.0, 0.0), PlannerBase<T>::kWorldFrame);
@@ -257,55 +276,54 @@ void QuadRRT<T>::saveResults()
   const size_t n_pose = final_Twb_vec_.size();
   std::vector<double> dummy_time(n_pose);
   rpg::PoseVec Twc_vec(n_pose);
-  rpg::PoseVec Twc_traj_yaw_vec(n_pose);
   unrealcv_bridge::UEPoseVec Twc_vec_ue(n_pose);
-  auto trajYawFromIdx = [this](const size_t idx) {
-    Eigen::Vector3d dir;
-    if (idx + 1 < final_Twb_vec_.size())
-    {
-      dir = final_Twb_vec_[idx + 1].getPosition() -
-            final_Twb_vec_[idx].getPosition();
-    }
-    else if (idx > 0)
-    {
-      dir = final_Twb_vec_[idx].getPosition() -
-            final_Twb_vec_[idx - 1].getPosition();
-    }
-    else
-    {
-      dir = Eigen::Vector3d::UnitX();
-    }
-
-    const double xy_norm = dir.head<2>().norm();
-    if (xy_norm < 1e-6)
-    {
-      dir = Eigen::Vector3d::UnitX();
-    }
-    return std::atan2(dir.y(), dir.x());
-  };
   for (size_t idx = 0; idx < final_Twb_vec_.size(); idx++)
   {
-    const rpg::Pose& Twb = final_Twb_vec_[idx];
-    Twc_vec[idx] = Twb * Tbc_;
+    Twc_vec[idx] = final_Twb_vec_[idx] * Tbc_;
     unrealcv_bridge::TwcToUEPose(Twc_vec[idx], &(Twc_vec_ue[idx]));
-
-    const double traj_yaw = trajYawFromIdx(idx);
-    Eigen::Matrix3d rot_mat;
-    quadAccYawToRwb(Eigen::Vector3d::Zero(), traj_yaw, &rot_mat, nullptr,
-                    nullptr);
-    const rpg::Pose Twb_traj_yaw(rpg::Rotation(rot_mat),
-                                 Twb.getPosition());
-    Twc_traj_yaw_vec[idx] = Twb_traj_yaw * Tbc_;
     dummy_time[idx] = static_cast<double>(idx);
   }
   saveStampedPoses(dummy_time, final_Twb_vec_,
                    save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwbNm);
   saveStampedPoses(dummy_time, Twc_vec,
                    save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwcNm);
-  saveStampedPoses(dummy_time, Twc_traj_yaw_vec,
-                   save_abs_dir_ + "/stamped_Twc_traj_yaw.txt");
   saveStampedPoses(dummy_time, Twc_vec_ue,
                    save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwcUENm);
+
+  VLOG(1) << "- yaw-aligned poses";
+  rpg::PoseVec Twc_path_yaw_vec(n_pose);
+  double prev_yaw = 0.0;
+  for (size_t idx = 0; idx < final_Twb_vec_.size(); idx++)
+  {
+    Eigen::Vector3d dir = Eigen::Vector3d::Zero();
+    if (final_Twb_vec_.size() > 1)
+    {
+      if (idx + 1 < final_Twb_vec_.size())
+      {
+        dir = final_Twb_vec_[idx + 1].getPosition() -
+              final_Twb_vec_[idx].getPosition();
+      }
+      else
+      {
+        dir = final_Twb_vec_[idx].getPosition() -
+              final_Twb_vec_[idx - 1].getPosition();
+      }
+    }
+
+    double yaw_heading = prev_yaw;
+    if (dir.norm() > 1e-6)
+    {
+      yaw_heading = std::atan2(dir.y(), dir.x());
+    }
+    const Eigen::Matrix3d yaw_R =
+        Eigen::AngleAxisd(yaw_heading, Eigen::Vector3d::UnitZ())
+            .toRotationMatrix();
+    rpg::Pose Twb_yaw(rpg::Rotation(yaw_R), final_Twb_vec_[idx].getPosition());
+    Twc_path_yaw_vec[idx] = Twb_yaw * Tbc_;
+    prev_yaw = yaw_heading;
+  }
+  saveStampedPoses(dummy_time, Twc_path_yaw_vec,
+                   save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwcPathYawNm);
 
   VLOG(1) << "- number of features";
   std::vector<size_t> n_ftrs(n_pose);
@@ -323,6 +341,14 @@ void QuadRRT<T>::saveResults()
 
   VLOG(1) << "- RRT related";
   rrt_stats_.save(save_abs_dir_);
+  if (last_plan_time_sec_ > 0.0)
+  {
+    std::ofstream time_out(save_abs_dir_ + "/rrt_plan_time_sec.txt");
+    if (time_out.is_open())
+    {
+      time_out << last_plan_time_sec_ << std::endl;
+    }
+  }
 }
 
 template <typename T>
@@ -353,6 +379,7 @@ void QuadRRT<T>::resetPlannerState()
 
   final_Twb_vec_.clear();
   rrt_stats_.clear();
+  last_plan_time_sec_ = -1.0;
   consec_lower_than_thresh_cnt_ = 0;
   has_valid_solution_ = false;
   has_exact_solution_ = false;
@@ -364,6 +391,7 @@ void QuadRRT<T>::clearRRT()
   CHECK(planner_);
   VLOG(1) << "reset RRT state (the planner config. does not change)";
   rrt_stats_.clear();
+  last_plan_time_sec_ = -1.0;
   consec_lower_than_thresh_cnt_ = 0;
   planner_->as<ompl::geometric::RRTstar>()->clear();
   planner_data_->clear();
@@ -376,6 +404,183 @@ bool QuadRRT<T>::clearRRTPlannerCallback(std_srvs::Empty::Request& /*req*/,
                                          std_srvs::Empty::Response& /*res*/)
 {
   clearRRT();
+  return true;
+}
+
+template <typename T>
+bool QuadRRT<T>::loadTrajectoryFromStampedTwbFile(const std::string& abs_fn)
+{
+  if (!rpg::fs::fileExists(abs_fn))
+  {
+    LOG(ERROR) << abs_fn << " does not exist.";
+    return false;
+  }
+
+  std::ifstream in(abs_fn);
+  if (!in.is_open())
+  {
+    LOG(ERROR) << "Failed to open " << abs_fn;
+    return false;
+  }
+
+  std::vector<Eigen::Matrix4d> Twb_mats;
+  std::string line;
+  while (std::getline(in, line))
+  {
+    if (line.empty() || line[0] == '#')
+    {
+      continue;
+    }
+    std::istringstream iss(line);
+    double v;
+    std::vector<double> vals;
+    while (iss >> v)
+    {
+      vals.push_back(v);
+    }
+    const bool has_time = vals.size() == 17;
+    const size_t offset = has_time ? 1 : 0;
+    if (vals.size() < (16 + offset))
+    {
+      continue;
+    }
+    Eigen::Matrix4d Twb = Eigen::Matrix4d::Identity();
+    size_t idx = 0;
+    for (int ri = 0; ri < 4; ri++)
+    {
+      for (int ci = 0; ci < 4; ci++)
+      {
+        Twb(ri, ci) = vals[offset + idx++];
+      }
+    }
+    Twb_mats.emplace_back(Twb);
+  }
+
+  if (Twb_mats.empty())
+  {
+    LOG(ERROR) << "No valid rows in " << abs_fn;
+    return false;
+  }
+
+  final_Twb_vec_.clear();
+  final_Twb_vec_.reserve(Twb_mats.size());
+  for (const auto& Twb_mat : Twb_mats)
+  {
+    const Eigen::Matrix3d Rwb = Twb_mat.block<3, 3>(0, 0);
+    const Eigen::Vector3d twb = Twb_mat.block<3, 1>(0, 3);
+    final_Twb_vec_.emplace_back(rpg::Pose(rpg::Rotation(Rwb), twb));
+  }
+
+  has_valid_solution_ = true;
+  has_exact_solution_ = true;
+  planner_data_.reset();
+  rrt_stats_.clear();
+  consec_lower_than_thresh_cnt_ = 0;
+  return true;
+}
+
+template <typename T>
+bool QuadRRT<T>::loadTrajectoryFromStampedTwcFile(const std::string& abs_fn)
+{
+  if (!rpg::fs::fileExists(abs_fn))
+  {
+    LOG(ERROR) << abs_fn << " does not exist.";
+    return false;
+  }
+
+  std::ifstream in(abs_fn);
+  if (!in.is_open())
+  {
+    LOG(ERROR) << "Failed to open " << abs_fn;
+    return false;
+  }
+
+  std::vector<Eigen::Matrix4d> Twc_mats;
+  std::string line;
+  while (std::getline(in, line))
+  {
+    if (line.empty() || line[0] == '#')
+    {
+      continue;
+    }
+    std::istringstream iss(line);
+    double v;
+    std::vector<double> vals;
+    while (iss >> v)
+    {
+      vals.push_back(v);
+    }
+
+    const bool has_time = vals.size() == 17;
+    const size_t offset = has_time ? 1 : 0;
+    if (vals.size() < (16 + offset))
+    {
+      continue;
+    }
+
+    Eigen::Matrix4d Twc = Eigen::Matrix4d::Identity();
+    size_t idx = 0;
+    for (int ri = 0; ri < 4; ri++)
+    {
+      for (int ci = 0; ci < 4; ci++)
+      {
+        Twc(ri, ci) = vals[offset + idx++];
+      }
+    }
+    Twc_mats.emplace_back(Twc);
+  }
+
+  if (Twc_mats.empty())
+  {
+    LOG(ERROR) << "No valid rows in " << abs_fn;
+    return false;
+  }
+
+  final_Twb_vec_.clear();
+  final_Twb_vec_.reserve(Twc_mats.size());
+  const rpg::Pose Tcb = Tbc_.inverse();
+  for (const auto& Twc_mat : Twc_mats)
+  {
+    const Eigen::Matrix3d Rwc = Twc_mat.block<3, 3>(0, 0);
+    const Eigen::Vector3d twc = Twc_mat.block<3, 1>(0, 3);
+    const rpg::Pose Twc(rpg::Rotation(Rwc), twc);
+    final_Twb_vec_.emplace_back(Twc * Tcb);
+  }
+
+  has_valid_solution_ = true;
+  has_exact_solution_ = true;
+  planner_data_.reset();
+  rrt_stats_.clear();
+  consec_lower_than_thresh_cnt_ = 0;
+  return true;
+}
+
+template <typename T>
+bool QuadRRT<T>::visualizeSavedRRTCallback(PlanConfig::Request& req,
+                                           PlanConfig::Response& /*res*/)
+{
+  // Load from stamped file and render exactly as plan_vis_save.
+  const bool is_twb_file =
+      req.config.find("Twb") != std::string::npos ||
+      req.config.find("twb") != std::string::npos;
+
+  bool load_ok = false;
+  if (is_twb_file)
+  {
+    load_ok = loadTrajectoryFromStampedTwbFile(req.config);
+  }
+  else
+  {
+    load_ok = loadTrajectoryFromStampedTwcFile(req.config);
+  }
+
+  if (!load_ok)
+  {
+    LOG(ERROR) << "Failed to load trajectory from " << req.config;
+    return false;
+  }
+
+  visualize();
   return true;
 }
 

@@ -1,12 +1,12 @@
 all_cfg:
   base:
-    # top.yaml: top
-    # diagonal.yaml: diagonal
-    # bottom.yaml: bottom
+    top.yaml: top
+    diagonal.yaml: diagonal
+    bottom.yaml: bottom
     left.yaml: left
-    # bigU.yaml: bigU
-    # smallU.yaml: smallU
-    # mid.yaml: mid
+    bigU.yaml: bigU
+    smallU.yaml: smallU
+    mid.yaml: mid
   var:
     - variations/none.yaml
     - variations/gp_det.yaml

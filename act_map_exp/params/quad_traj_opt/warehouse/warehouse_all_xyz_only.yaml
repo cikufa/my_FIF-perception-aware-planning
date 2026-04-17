@@ -1,0 +1,13 @@
+all:
+  base:
+    warehouse_top_xyz_only.yaml: warehouse_top
+    warehouse_diagonal_xyz_only.yaml: warehouse_diagonal
+    warehouse_bottom_xyz_only.yaml: warehouse_bottom
+    warehouse_left_xyz_only.yaml: warehouse_left
+    warehouse_right_xyz_only.yaml: warehouse_right
+    warehouse_mid_xyz_only.yaml: warehouse_mid
+    warehouse_side_xyz_only.yaml: warehouse_side
+    warehouse_smallU_xyz_only.yaml: warehouse_smallU
+    warehouse_bigU_xyz_only.yaml: warehouse_bigU
+  var:
+    - variations/none.yaml

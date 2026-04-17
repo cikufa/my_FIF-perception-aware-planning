@@ -15,11 +15,11 @@ set(HEADERS
   include/act_map_exp/quad_traj_opt_impl.h
   include/act_map_exp/quad_rrt.h
   include/act_map_exp/quad_rrt_impl.h
+  include/act_map_exp/quad_rrt_impl_org.h
   include/act_map_exp/exp_utils.h
   include/act_map_exp/numdiff-jacobian-tester.h
   include/act_map_exp/potential_cost.h
   include/act_map_exp/viz_utils.h
-  include/act_map_exp/stamped_pose_viz.h
   include/act_map_exp/poly_traj_helper.h
   include/act_map_exp/ompl_utils.h
   )
@@ -31,7 +31,6 @@ set(SOURCES
   src/exp_utils.cpp
   src/potential_cost.cpp
   src/viz_utils.cpp
-  src/stamped_pose_viz.cpp
   src/poly_traj_helper.cpp
   )
 
@@ -47,6 +46,22 @@ target_link_libraries(quad_traj_opt_node ${PROJECT_NAME})
 
 cs_add_executable(quad_rrt_node src/quad_rrt_node.cpp)
 target_link_libraries(quad_rrt_node ${PROJECT_NAME})
+
+# rrt result visualizer
+cs_add_executable(rrt_info_viz_node src/rrt_info_viz_node.cpp)
+target_link_libraries(rrt_info_viz_node ${PROJECT_NAME})
+
+# static trajectory comparison visualizer
+cs_add_executable(static_traj_compare_viz_node src/static_traj_compare_viz_node.cpp)
+target_link_libraries(static_traj_compare_viz_node ${PROJECT_NAME})
+
+# mesh generator caller
+cs_add_executable(call_generate_mesh_node src/call_generate_mesh_node.cpp)
+target_link_libraries(call_generate_mesh_node ${PROJECT_NAME})
+
+# validity checker
+cs_add_executable(check_rrt_validity_node src/check_rrt_validity.cpp)
+target_link_libraries(check_rrt_validity_node ${PROJECT_NAME})
 
 # tests
 catkin_add_gtest(test_exp_utils tests/test_exp_utils.cpp)

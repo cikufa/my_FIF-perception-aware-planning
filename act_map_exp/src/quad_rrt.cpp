@@ -32,11 +32,11 @@ void RRTStats::save(const std::string& dir) const
     data(i, 2) = best_costs_[idx_i];
     data(i, 3) = static_cast<double>(n_verts_[idx_i]);
     data(i, 4) = static_cast<double>(n_edges_[idx_i]);
-    rpg::save(dir + "/rrt_verts_iter_" + std::to_string(i) + ".txt",
-              vertices_[idx_i], rpg::EigenSpaceSeparatedFmt, "edges: x y z");
-    rpg::save(dir + "/rrt_edges_iter_" + std::to_string(i) + ".txt",
-              edge_pairs_[idx_i], rpg::EigenSpaceSeparatedFmt,
-              "pair: id_start id_end");
+    // rpg::save(dir + "/rrt_verts_iter_" + std::to_string(i) + ".txt",
+    //           vertices_[idx_i], rpg::EigenSpaceSeparatedFmt, "edges: x y z");
+    // rpg::save(dir + "/rrt_edges_iter_" + std::to_string(i) + ".txt",
+    //           edge_pairs_[idx_i], rpg::EigenSpaceSeparatedFmt,
+    //           "pair: id_start id_end");
   }
 
   rpg::save(dir + "/rrt_stats.txt", data, rpg::EigenSpaceSeparatedFmt,

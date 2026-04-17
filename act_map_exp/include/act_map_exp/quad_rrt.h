@@ -88,10 +88,12 @@ private:
   void clearRRT();
   bool clearRRTPlannerCallback(std_srvs::Empty::Request& req,
                                std_srvs::Empty::Response& res);
-  bool visualizeSavedRRTCallback(VisualizeStampedPoses::Request& req,
-                                 VisualizeStampedPoses::Response& res);
+  bool visualizeSavedRRTCallback(PlanConfig::Request& req,
+                                 PlanConfig::Response& res);
 
   void loadFromYaml(const std::string& param_fn);
+  bool loadTrajectoryFromStampedTwcFile(const std::string& abs_fn);
+  bool loadTrajectoryFromStampedTwbFile(const std::string& abs_fn);
 
   void visualizeRRTVertsEdges() const;
   void visualizeRRTPath() const;
@@ -162,9 +164,11 @@ private:
   // results
   mutable rpg::PoseVec final_Twb_vec_;
   RRTStats rrt_stats_;
+  double last_plan_time_sec_ = -1.0;
   std::string save_abs_dir_;
 };
 
 }
 
-#include "act_map_exp/quad_rrt_impl.h"
+// #include "act_map_exp/quad_rrt_impl.h"
+#include "act_map_exp/quad_rrt_impl_org.h"

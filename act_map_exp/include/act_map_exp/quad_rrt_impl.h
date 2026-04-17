@@ -3,9 +3,15 @@
 #include "act_map_exp/quad_rrt.h"
 #include <yaml-cpp/yaml.h>
 #include <rpg_common/fs.h>
+#include <rpg_common/load.h>
+#include <rpg_common/timer.h>
 #include <rpg_common_ros/params_helper.h>
+#include <Eigen/Geometry>
+#include <cmath>
+#include <fstream>
 
 #include <ompl/geometric/planners/rrt/RRTstar.h>
+#include <ompl/geometric/PathGeometric.h>
 #include "act_map_exp/ompl_utils.h"
 #include "act_map_exp/exp_utils.h"
 #include "act_map_exp/viz_utils.h"
@@ -41,6 +47,8 @@ QuadRRT<T>::QuadRRT(const ros::NodeHandle& nh, const ros::NodeHandle& pnh)
 
   clear_rrt_planner_srv_ = this->pnh_.advertiseService(
       "clear_rrt_planner", &QuadRRT::clearRRTPlannerCallback, this);
+  visualize_saved_rrt_srv_ = this->pnh_.advertiseService(
+      "visualize_saved_rrt", &QuadRRT::visualizeSavedRRTCallback, this);
   red_.r = 1.0;
   red_.g = 0.0;
   red_.b = 0.0;
@@ -74,6 +82,9 @@ void QuadRRT<T>::plan()
   final_Twb_vec_.clear();
   consec_lower_than_thresh_cnt_ = 0;
   VLOG(1) << "Start RRT plan.";
+  last_plan_time_sec_ = -1.0;
+  rpg::Timer plan_timer;
+  plan_timer.start();
   const size_t n_iter_prev = rrt_stats_.size();
   for (int cur_iter = 0; cur_iter < max_n_iter_; cur_iter++)
   {
@@ -172,6 +183,9 @@ void QuadRRT<T>::plan()
       {
         VLOG(1) << "Visualize current results...";
         extractRRTPathPoses();
+        // VLOG(1) << "pathhhhhhhhhhhhhhhhhhhhhhhhhhh";
+        // VLOG(1) << final_Twb_vec_;
+        // std::cout<<"pathhhhhhhhhhhhhhhhhhhhhhhhhhh"<<final_Twb_vec_;
         visualize();
       }
     }
@@ -181,6 +195,8 @@ void QuadRRT<T>::plan()
     }
   }
 
+  last_plan_time_sec_ = plan_timer.stop();
+  LOG(INFO) << "RRT plan time: " << last_plan_time_sec_ << " sec.";
   if (has_valid_solution_)
   {
     VLOG(1) << "Solve successfully!";
@@ -199,8 +215,20 @@ void QuadRRT<T>::extractRRTPathPoses() const
 
   final_Twb_vec_.clear();
   ob::PathPtr path = pdef_->getSolutionPath();
-  const std::vector<ob::State*>& states =
-      path->as<ompl::geometric::PathGeometric>()->getStates();
+  // Interpolate only when we have a geometric path.
+  ompl::geometric::PathGeometric* geo_path =
+      path->as<ompl::geometric::PathGeometric>();
+  if (geo_path)
+  {
+    geo_path->interpolate(50);  // shekoufeh
+  }
+  else
+  {
+    LOG(WARNING) << "Solution path is not PathGeometric; skip interpolation.";
+    return;
+  }
+  const std::vector<ob::State*>& states = geo_path->getStates();
+
   final_Twb_vec_.reserve(states.size());
   for (const ob::State* s : states)
   {
@@ -223,6 +251,7 @@ void QuadRRT<T>::visualize()
   }
   VLOG(1) << "start visualizaiton...";
   clearMarkerArray(this->traj_orient_pub_);
+  
   visualizeTrajectory(
       final_Twb_vec_, this->traj_pos_pub_, this->traj_orient_pub_, Tbc_,
       Eigen::Vector3d(0.0, 1.0, 0.0), PlannerBase<T>::kWorldFrame);
@@ -264,6 +293,50 @@ void QuadRRT<T>::saveResults()
   saveStampedPoses(dummy_time, Twc_vec_ue,
                    save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwcUENm);
 
+  VLOG(1) << "- yaw-aligned poses";
+  rpg::PoseVec Twc_path_yaw_vec(n_pose);
+  unrealcv_bridge::UEPoseVec Twc_path_yaw_vec_ue(n_pose);
+  double prev_yaw = 0.0;
+  for (size_t idx = 0; idx < final_Twb_vec_.size(); idx++)
+  {
+    Eigen::Vector3d dir = Eigen::Vector3d::Zero();
+    if (final_Twb_vec_.size() > 1)
+    {
+      if (idx + 1 < final_Twb_vec_.size())
+      {
+        dir = final_Twb_vec_[idx + 1].getPosition() -
+              final_Twb_vec_[idx].getPosition();
+      }
+      else
+      {
+        dir = final_Twb_vec_[idx].getPosition() -
+              final_Twb_vec_[idx - 1].getPosition();
+      }
+    }
+
+    double yaw_heading = prev_yaw;
+    if (dir.norm() > 1e-6)
+    {
+      yaw_heading = std::atan2(dir.y(), dir.x());
+    }
+    // Level rotation with yaw along the path; no Tbc applied (camera == body).
+    const Eigen::Matrix3d yaw_R =
+        Eigen::AngleAxisd(yaw_heading, Eigen::Vector3d::UnitZ())
+            .toRotationMatrix();
+    rpg::Pose Twb_yaw(rpg::Rotation(yaw_R), final_Twb_vec_[idx].getPosition());
+
+    // Apply full Tbc so camera pose matches the body->cam transform while heading-aligned.
+    Twc_path_yaw_vec[idx] = Twb_yaw * Tbc_;
+    unrealcv_bridge::TwcToUEPose(Twc_path_yaw_vec[idx],
+                                 &(Twc_path_yaw_vec_ue[idx]));
+    prev_yaw = yaw_heading;
+  }
+  saveStampedPoses(dummy_time, Twc_path_yaw_vec,
+                   save_abs_dir_ + "/" + PlannerBase<T>::kSaveTwcPathYawNm);
+  saveStampedPoses(dummy_time, Twc_path_yaw_vec_ue,
+                   save_abs_dir_ + "/" +
+                       PlannerBase<T>::kSaveTwcPathYawUENm);
+
   VLOG(1) << "- number of features";
   std::vector<size_t> n_ftrs(n_pose);
   const act_map::ActMap<T>& map = this->act_map_server_->getActMapCRef();
@@ -280,6 +353,14 @@ void QuadRRT<T>::saveResults()
 
   VLOG(1) << "- RRT related";
   rrt_stats_.save(save_abs_dir_);
+  if (last_plan_time_sec_ > 0.0)
+  {
+    std::ofstream time_out(save_abs_dir_ + "/rrt_plan_time_sec.txt");
+    if (time_out.is_open())
+    {
+      time_out << last_plan_time_sec_ << std::endl;
+    }
+  }
 }
 
 template <typename T>
@@ -310,6 +391,7 @@ void QuadRRT<T>::resetPlannerState()
 
   final_Twb_vec_.clear();
   rrt_stats_.clear();
+  last_plan_time_sec_ = -1.0;
   consec_lower_than_thresh_cnt_ = 0;
   has_valid_solution_ = false;
   has_exact_solution_ = false;
@@ -321,6 +403,7 @@ void QuadRRT<T>::clearRRT()
   CHECK(planner_);
   VLOG(1) << "reset RRT state (the planner config. does not change)";
   rrt_stats_.clear();
+  last_plan_time_sec_ = -1.0;
   consec_lower_than_thresh_cnt_ = 0;
   planner_->as<ompl::geometric::RRTstar>()->clear();
   planner_data_->clear();
@@ -333,6 +416,100 @@ bool QuadRRT<T>::clearRRTPlannerCallback(std_srvs::Empty::Request& /*req*/,
                                          std_srvs::Empty::Response& /*res*/)
 {
   clearRRT();
+  return true;
+}
+
+template <typename T>
+bool QuadRRT<T>::visualizeSavedRRTCallback(PlanConfig::Request& req,
+                                           PlanConfig::Response& /*res*/)
+{
+  // Load from stamped file and render exactly as plan_vis_save.
+  auto load_twb_from_file = [&](const std::string& abs_fn) -> bool {
+    if (!rpg::fs::fileExists(abs_fn))
+    {
+      LOG(ERROR) << abs_fn << " does not exist.";
+      return false;
+    }
+    std::ifstream in(abs_fn);
+    if (!in.is_open())
+    {
+      LOG(ERROR) << "Failed to open " << abs_fn;
+      return false;
+    }
+    std::vector<Eigen::Matrix4d> mats;
+    std::string line;
+    while (std::getline(in, line))
+    {
+      if (line.empty() || line[0] == '#')
+      {
+        continue;
+      }
+      std::istringstream iss(line);
+      double v;
+      std::vector<double> vals;
+      while (iss >> v)
+      {
+        vals.push_back(v);
+      }
+      const bool has_time = vals.size() == 17;
+      const size_t offset = has_time ? 1 : 0;
+      if (vals.size() < (16 + offset))
+      {
+        continue;
+      }
+      Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+      size_t idx = 0;
+      for (int ri = 0; ri < 4; ri++)
+      {
+        for (int ci = 0; ci < 4; ci++)
+        {
+          T(ri, ci) = vals[offset + idx++];
+        }
+      }
+      mats.emplace_back(T);
+    }
+    if (mats.empty())
+    {
+      LOG(ERROR) << "No valid rows in " << abs_fn;
+      return false;
+    }
+    final_Twb_vec_.clear();
+    final_Twb_vec_.reserve(mats.size());
+    for (const auto& Tmat : mats)
+    {
+      const Eigen::Matrix3d R = Tmat.block<3, 3>(0, 0);
+      const Eigen::Vector3d t = Tmat.block<3, 1>(0, 3);
+      final_Twb_vec_.emplace_back(rpg::Pose(rpg::Rotation(R), t));
+    }
+    has_valid_solution_ = true;
+    has_exact_solution_ = true;
+    planner_data_.reset();
+    rrt_stats_.clear();
+    consec_lower_than_thresh_cnt_ = 0;
+    return true;
+  };
+
+  const bool is_twb_file =
+      req.config.find("Twb") != std::string::npos ||
+      req.config.find("twb") != std::string::npos;
+
+  bool load_ok = false;
+  if (is_twb_file)
+  {
+    load_ok = load_twb_from_file(req.config);
+  }
+  else
+  {
+    load_ok = loadTrajectoryFromStampedTwcFile(req.config);
+  }
+
+  if (!load_ok)
+  {
+    LOG(ERROR) << "Failed to load trajectory from " << req.config;
+    return false;
+  }
+
+  visualize();
   return true;
 }
 
@@ -512,6 +689,158 @@ void QuadRRT<T>::loadFromYaml(const std::string& param_fn)
     VLOG(1) << "Info. potential settings do not change, skip.";
   }
 }
+
+template <typename T>
+bool QuadRRT<T>::loadTrajectoryFromUEFile(const std::string& abs_fn)
+{
+  if (!rpg::fs::fileExists(abs_fn))
+  {
+    LOG(ERROR) << abs_fn << " does not exist.";
+    return false;
+  }
+
+  std::ifstream in(abs_fn);
+  if (!in.is_open())
+  {
+    LOG(ERROR) << "Failed to open " << abs_fn;
+    return false;
+  }
+
+  std::vector<std::array<double, 7>> rows;
+  std::string line;
+  while (std::getline(in, line))
+  {
+    if (line.empty() || line[0] == '#')
+    {
+      continue;
+    }
+    std::istringstream iss(line);
+    double v;
+    std::array<double, 7> vals{};
+    int cnt = 0;
+    while (iss >> v && cnt < 7)
+    {
+      vals[cnt++] = v;
+    }
+    if (cnt == 6 || cnt == 7)
+    {
+      rows.push_back(vals);
+    }
+  }
+
+  if (rows.empty())
+  {
+    LOG(ERROR) << "No valid rows in " << abs_fn;
+    return false;
+  }
+
+  const int offset = rows.front()[6] != 0.0 ? 1 : 0;  // 7 cols -> skip time
+  const rpg::Pose Tcb = Tbc_.inverse();
+  final_Twb_vec_.clear();
+  final_Twb_vec_.reserve(rows.size());
+  for (const auto& r : rows)
+  {
+    unrealcv_bridge::UEPose uep;
+    uep.x = r[offset + 0];
+    uep.y = r[offset + 1];
+    uep.z = r[offset + 2];
+    uep.pitch = r[offset + 3];
+    uep.yaw = r[offset + 4];
+    uep.roll = r[offset + 5];
+
+    rpg::Pose Twc;
+    uep.toTwc(&Twc);
+    final_Twb_vec_.emplace_back(Twc * Tcb);
+  }
+
+  has_valid_solution_ = true;
+  has_exact_solution_ = true;
+  planner_data_.reset();
+  rrt_stats_.clear();
+  consec_lower_than_thresh_cnt_ = 0;
+  VLOG(1) << "Loaded " << final_Twb_vec_.size() << " poses from " << abs_fn;
+  return true;
+}
+
+template <typename T>
+bool QuadRRT<T>::loadTrajectoryFromStampedTwcFile(const std::string& abs_fn)
+{
+  if (!rpg::fs::fileExists(abs_fn))
+  {
+    LOG(ERROR) << abs_fn << " does not exist.";
+    return false;
+  }
+
+  std::ifstream in(abs_fn);
+  if (!in.is_open())
+  {
+    LOG(ERROR) << "Failed to open " << abs_fn;
+    return false;
+  }
+
+  std::vector<Eigen::Matrix4d> Twc_mats;
+  std::string line;
+  while (std::getline(in, line))
+  {
+    if (line.empty() || line[0] == '#')
+    {
+      continue;
+    }
+    std::istringstream iss(line);
+    double v;
+    std::vector<double> vals;
+    while (iss >> v)
+    {
+      vals.push_back(v);
+    }
+
+    const bool has_time = vals.size() == 17;
+    const size_t offset = has_time ? 1 : 0;
+    if (vals.size() < (16 + offset))
+    {
+      VLOG(1) << "Skipping row with insufficient entries in " << abs_fn;
+      continue;
+    }
+
+    Eigen::Matrix4d Twc = Eigen::Matrix4d::Identity();
+    size_t idx = 0;
+    for (int ri = 0; ri < 4; ri++)
+    {
+      for (int ci = 0; ci < 4; ci++)
+      {
+        Twc(ri, ci) = vals[offset + idx++];
+      }
+    }
+    Twc_mats.emplace_back(Twc);
+  }
+
+  if (Twc_mats.empty())
+  {
+    LOG(ERROR) << "No valid rows in " << abs_fn;
+    return false;
+  }
+
+  final_Twb_vec_.clear();
+  final_Twb_vec_.reserve(Twc_mats.size());
+  const rpg::Pose Tcb = Tbc_.inverse();
+  for (const auto& Twc_mat : Twc_mats)
+  {
+    const Eigen::Matrix3d Rwc = Twc_mat.block<3, 3>(0, 0);
+    const Eigen::Vector3d twc = Twc_mat.block<3, 1>(0, 3);
+    const rpg::Pose Twc(rpg::Rotation(Rwc), twc);
+    final_Twb_vec_.emplace_back(Twc * Tcb);  // undo Tbc so visualize() can reapply
+  }
+
+  has_valid_solution_ = true;
+  has_exact_solution_ = true;
+  planner_data_.reset();
+  rrt_stats_.clear();
+  consec_lower_than_thresh_cnt_ = 0;
+  VLOG(1) << "Loaded " << final_Twb_vec_.size() << " Twb matrices from "
+          << abs_fn;
+  return true;
+}
+
 
 template <typename T>
 void QuadRRT<T>::visualizeRRTVertsEdges() const
@@ -766,4 +1095,4 @@ double QuadRRT<T>::calValidityResolution() const
   }
 }
 
-}  // namespace act_map_exp
+}
