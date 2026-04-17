@@ -7,21 +7,22 @@ config="${FOV_REG_CFG:-${root_dir}/act_map_exp/params/quad_rrt/warehouse/warehou
 defaults="${FOV_REG_DEFAULTS:-${root_dir}/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults.yaml}"
 
 mode=""
-along=""
+with_along_path=true
 dataset=""
 defaults_override=""
 extra_args=()
+dataset_mode="single"
+defaults_r1="${root_dir}/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r1_a30.yaml"
+defaults_r2="${root_dir}/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r2_a20.yaml"
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [--variants|--optimized|--all] [--normal|--along-path|--both] [extra run_planner_exp args]
+Usage: $(basename "$0") [--variants|--optimized|--all] [--no-along-path] [--dataset NAME] [extra run_planner_exp args]
   --variants     Register all non-optimized variations.
   --optimized    Register optimized results only.
   --all          Register both non-optimized variations and optimized results.
-  --normal       Use normal optimized output (optimized/all modes only).
-  --along-path   Use along-path optimized output (optimized/all modes only).
-  --both         Register both normal and along-path optimized outputs.
-  --dataset      r2_a20 or r1_a30 (selects defaults file).
+  --no-along-path  Disable along_path baseline generation for --variants.
+  --dataset      r2_a20, r1_a30, or both (selects defaults file[s]).
   --defaults-yaml PATH  Override defaults yaml.
 USAGE
 }
@@ -38,19 +39,28 @@ while [[ $# -gt 0 ]]; do
       mode="all"
       ;;
     --along-path|--along_path)
-      along="along"
+      with_along_path=true
       ;;
-    --normal)
-      along="normal"
+    --no-along-path|--no_along_path)
+      with_along_path=false
       ;;
-    --both)
-      along="both"
+    --normal|--both)
+      echo "Error: only optimized_path_yaw is supported now (no --normal/--both)." >&2
+      exit 2
       ;;
     --dataset)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --dataset" >&2
+        exit 2
+      fi
       dataset="$2"
       shift
       ;;
     --defaults-yaml|--defaults_yaml)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --defaults-yaml" >&2
+        exit 2
+      fi
       defaults_override="$2"
       shift
       ;;
@@ -69,69 +79,100 @@ if [[ -z "$mode" ]]; then
   mode="variants"
 fi
 
+# Default to all frames unless caller explicitly provides max_reg_images.
+default_max_reg=()
+has_max_reg=false
+for arg in "${extra_args[@]}"; do
+  case "$arg" in
+    --max_reg_images|--max-reg-images|--max_reg_images=*|--max-reg-images=*)
+      has_max_reg=true
+      break
+      ;;
+  esac
+done
+if [[ "${has_max_reg}" == "false" ]]; then
+  default_max_reg=(--max_reg_images 0)
+fi
+
 if [[ -n "${dataset}" ]]; then
   case "${dataset}" in
     r2_a20)
-      defaults="${root_dir}/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r2_a20.yaml"
+      defaults="${defaults_r2}"
       ;;
     r1_a30)
-      defaults="${root_dir}/act_map_exp/params/quad_rrt/warehouse/run_planner_defaults_r1_a30.yaml"
+      defaults="${defaults_r1}"
+      ;;
+    both)
+      dataset_mode="both"
       ;;
     *)
-      echo "Unknown dataset: ${dataset} (expected r2_a20 or r1_a30)" >&2
+      echo "Unknown dataset: ${dataset} (expected r2_a20, r1_a30, or both)" >&2
       exit 2
       ;;
   esac
 fi
 
 if [[ -n "${defaults_override}" ]]; then
-  defaults="${defaults_override}"
+  if [[ "${dataset_mode}" == "both" ]]; then
+    echo "Warning: --dataset both with --defaults-yaml uses the same defaults for both runs." >&2
+    defaults_r1="${defaults_override}"
+    defaults_r2="${defaults_override}"
+  else
+    defaults="${defaults_override}"
+  fi
 fi
-
-if [[ "$mode" == "variants" && ( "$along" == "along" || "$along" == "both" ) ]]; then
-  echo "--along-path/--both is only valid with --optimized or --all" >&2
-  exit 1
-fi
-
-base_cmd=(python3 "$planner" "$config" --defaults_yaml "$defaults")
 
 run_variants() {
-  local cmd=("${base_cmd[@]}" --skip_optimized)
+  local defaults_file="$1"
+  local cmd=(python3 "$planner" "$config" --defaults_yaml "$defaults_file" --skip_optimized)
+  if [[ "${with_along_path}" == "true" ]]; then
+    cmd+=(--along_path)
+  fi
+  cmd+=("${default_max_reg[@]}")
   cmd+=("${extra_args[@]}")
   "${cmd[@]}"
 }
 
 run_optimized() {
-  local mode="$1"
-  local cmd=("${base_cmd[@]}" --only_optimized)
-  if [[ "$mode" == "along" ]]; then
-    cmd+=(--along_path)
-  fi
+  local defaults_file="$1"
+  local cmd=(python3 "$planner" "$config" --defaults_yaml "$defaults_file" --only_optimized)
+  cmd+=(--along_path)
+  cmd+=("${default_max_reg[@]}")
   cmd+=("${extra_args[@]}")
   "${cmd[@]}"
 }
 
 case "$mode" in
   variants)
-    cmd=("${base_cmd[@]}" --skip_optimized "${extra_args[@]}")
-    exec "${cmd[@]}"
-    ;;
-  optimized)
-    if [[ "$along" == "both" ]]; then
-      run_optimized "normal"
-      run_optimized "along"
+    if [[ "${dataset_mode}" == "both" ]]; then
+      run_variants "${defaults_r1}"
+      run_variants "${defaults_r2}"
       exit 0
     fi
-    run_optimized "$along"
+    run_variants "${defaults}"
+    exit 0
+    ;;
+  optimized)
+    if [[ "${dataset_mode}" == "both" ]]; then
+      run_optimized "${defaults_r1}"
+      run_optimized "${defaults_r2}"
+      exit 0
+    fi
+    run_optimized "${defaults}"
     exit 0
     ;;
   all)
-    run_variants
-    if [[ "$along" == "both" ]]; then
-      run_optimized "normal"
-      run_optimized "along"
+    if [[ "${dataset_mode}" == "both" ]]; then
+      run_variants "${defaults_r1}"
+      run_variants "${defaults_r2}"
     else
-      run_optimized "$along"
+      run_variants "${defaults}"
+    fi
+    if [[ "${dataset_mode}" == "both" ]]; then
+      run_optimized "${defaults_r1}"
+      run_optimized "${defaults_r2}"
+    else
+      run_optimized "${defaults}"
     fi
     ;;
 esac

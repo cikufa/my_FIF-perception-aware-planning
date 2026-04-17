@@ -9,7 +9,7 @@ import subprocess
 import time
 import math
 from pathlib import Path
-
+import sys
 import optuna
 
 
@@ -19,18 +19,67 @@ STAT_INDEX = {
     "avg": 2,
     "std": 3,
 }
+POSE_ERROR_MODES = {"finite", "original", "penalized"}
 
 SUPPORTED_FIXED_PARAMS = {
-    "max_iter",
+    "max_iteration",
     "ks",
     "ks_transition_deg",
     "base_step_scale",
     "min_step_deg",
     "max_step_deg",
     "step_norm_mode",
-    "traj_jac_step",
+    "trajectory_jacobian_step",
     "fov_schedule",
 }
+
+# Legacy aliases (short names) -> canonical names.
+_LEGACY_PARAM_ALIASES = {
+    "max_iter": "max_iteration",
+    "traj_jac_step": "trajectory_jacobian_step",
+}
+_LEGACY_RANGE_ALIASES = {
+    "max_iter_range": "max_iteration_range",
+    "traj_jac_step_range": "trajectory_jacobian_step_range",
+}
+_LEGACY_TUNE_ALIASES = {
+    "tune_max_iter": "tune_max_iteration",
+    "tune_traj_jac_step": "tune_trajectory_jacobian_step",
+}
+
+
+def _apply_legacy_aliases_dict(raw):
+    if not isinstance(raw, dict):
+        return raw
+    out = dict(raw)
+    for src, dst in _LEGACY_PARAM_ALIASES.items():
+        if src in out and dst not in out:
+            out[dst] = out[src]
+        if src in out:
+            out.pop(src, None)
+    return out
+
+
+def _apply_config_aliases(merged):
+    if not isinstance(merged, dict):
+        return merged
+    out = dict(merged)
+    for src, dst in _LEGACY_PARAM_ALIASES.items():
+        if src in out and dst not in out:
+            out[dst] = out[src]
+        out.pop(src, None)
+    for src, dst in _LEGACY_RANGE_ALIASES.items():
+        if src in out and dst not in out:
+            out[dst] = out[src]
+        out.pop(src, None)
+    for src, dst in _LEGACY_TUNE_ALIASES.items():
+        if src in out and dst not in out:
+            out[dst] = out[src]
+        out.pop(src, None)
+    for key in ("fixed_params", "initial_params"):
+        if key in out:
+            out[key] = _apply_legacy_aliases_dict(out[key])
+    return out
 
 
 def parse_error_stat(path: Path, stat: str):
@@ -58,10 +107,41 @@ def parse_error_stat_files(paths, stat: str):
     return statistics.mean(te_vals), statistics.mean(re_vals)
 
 
-def parse_pose_errors(path: Path, stat: str):
+def _find_analysis_cfg(start: Path):
+    cur = start.resolve()
+    for parent in [cur] + list(cur.parents):
+        cand = parent / "analysis_cfg.yaml"
+        if cand.exists():
+            return cand
+    return None
+
+
+def _resolve_penalty_value(values, penalty):
+    if penalty is not None and math.isfinite(penalty):
+        return float(penalty)
+    finite = [v for v in values if math.isfinite(v)]
+    if finite:
+        return float(max(finite))
+    return 0.0
+
+
+def _apply_pose_error_mode(values, mode, plot_max, penalty):
+    if mode == "finite":
+        return [v for v in values if math.isfinite(v)]
+    if mode == "original":
+        fill = _resolve_penalty_value(values, plot_max)
+        return [v if math.isfinite(v) else fill for v in values]
+    if mode == "penalized":
+        fill = _resolve_penalty_value(values, penalty)
+        return [v if math.isfinite(v) else fill for v in values]
+    return [v for v in values if math.isfinite(v)]
+
+
+def _load_pose_errors_rows(path: Path, max_trans_e_m, max_rot_e_deg):
     te_vals = []
     re_vals = []
     total = 0
+    nan_count = 0
     with path.open("r", encoding="utf-8") as handle:
         for line_idx, line in enumerate(handle):
             if line_idx == 0:
@@ -70,36 +150,110 @@ def parse_pose_errors(path: Path, stat: str):
             if len(parts) < 3:
                 continue
             total += 1
-            if parts[1] != "nan":
-                te_vals.append(float(parts[1]))
-            if parts[2] != "nan":
-                re_vals.append(float(parts[2]))
+            te_raw = float("nan") if parts[1] == "nan" else float(parts[1])
+            re_raw = float("nan") if parts[2] == "nan" else float(parts[2])
+            if math.isfinite(max_trans_e_m) and math.isfinite(te_raw) and te_raw > max_trans_e_m:
+                te_raw = float("nan")
+            if math.isfinite(max_rot_e_deg) and math.isfinite(re_raw) and re_raw > max_rot_e_deg:
+                re_raw = float("nan")
+            if not math.isfinite(te_raw) or not math.isfinite(re_raw):
+                nan_count += 1
+            te_vals.append(te_raw)
+            re_vals.append(re_raw)
+    return te_vals, re_vals, nan_count, total
+
+
+def _resolve_base_cfg(args):
+    cfg_path = getattr(args, "base_analysis_cfg", None)
+    if not cfg_path:
+        return {}
+    path = Path(cfg_path)
+    if not path.exists():
+        return {}
+    try:
+        return load_yaml_config(path)
+    except Exception:
+        return {}
+
+
+def parse_pose_errors(path: Path, stat: str, mode: str, base_cfg=None):
+    if base_cfg is None:
+        base_cfg = {}
+    ana_cfg = dict(base_cfg)
+    analysis_cfg = _find_analysis_cfg(path.parent)
+    if analysis_cfg:
+        try:
+            ana_cfg.update(load_yaml_config(analysis_cfg))
+        except Exception:
+            pass
+    hist_max_trans = float(ana_cfg.get("hist_max_trans_e", float("nan")))
+    hist_max_rot = float(ana_cfg.get("hist_max_rot_e", float("nan")))
+    max_trans_e_m = float(ana_cfg.get("max_trans_e_m", hist_max_trans))
+    max_rot_e_deg = float(ana_cfg.get("max_rot_e_deg", hist_max_rot))
+
+    te_raw, re_raw, nan_count, total = _load_pose_errors_rows(
+        path, max_trans_e_m, max_rot_e_deg
+    )
+    plot_max_trans = 1.2 * hist_max_trans if math.isfinite(hist_max_trans) else float("nan")
+    plot_max_rot = 1.2 * hist_max_rot if math.isfinite(hist_max_rot) else float("nan")
+    penalty_trans = max_trans_e_m if math.isfinite(max_trans_e_m) else hist_max_trans
+    penalty_rot = max_rot_e_deg if math.isfinite(max_rot_e_deg) else hist_max_rot
+
+    te_vals = _apply_pose_error_mode(te_raw, mode, plot_max_trans, penalty_trans)
+    re_vals = _apply_pose_error_mode(re_raw, mode, plot_max_rot, penalty_rot)
     if not te_vals or not re_vals:
         raise RuntimeError(f"pose_errors file has no usable entries: {path}")
-    return compute_stat(te_vals, stat), compute_stat(re_vals, stat)
+    nan_ratio = float("nan") if total == 0 else nan_count / total
+    return compute_stat(te_vals, stat), compute_stat(re_vals, stat), nan_ratio
 
 
-def parse_pose_errors_files(paths, stat: str):
+def parse_pose_errors_files(paths, stat: str, mode: str, base_cfg=None):
+    if base_cfg is None:
+        base_cfg = {}
     te_vals = []
     re_vals = []
+    nan_total = 0
+    total = 0
     for path in paths:
         path_obj = Path(path)
         if not path_obj.exists():
-            raise RuntimeError(f"pose_errors file missing: {path_obj}")
-        with path_obj.open("r", encoding="utf-8") as handle:
-            for line_idx, line in enumerate(handle):
-                if line_idx == 0:
-                    continue
-                parts = line.strip().split()
-                if len(parts) < 3:
-                    continue
-                if parts[1] != "nan":
-                    te_vals.append(float(parts[1]))
-                if parts[2] != "nan":
-                    re_vals.append(float(parts[2]))
+            alt = None
+            if path_obj.name == "pose_errors_path_yaw.txt":
+                alt = path_obj.with_name("pose_errors.txt")
+            elif path_obj.name == "pose_errors.txt":
+                alt = path_obj.with_name("pose_errors_path_yaw.txt")
+            if alt is not None and alt.exists():
+                path_obj = alt
+            else:
+                raise RuntimeError(f"pose_errors file missing: {path_obj}")
+
+        ana_cfg = dict(base_cfg)
+        analysis_cfg = _find_analysis_cfg(path_obj.parent)
+        if analysis_cfg:
+            try:
+                ana_cfg.update(load_yaml_config(analysis_cfg))
+            except Exception:
+                pass
+        hist_max_trans = float(ana_cfg.get("hist_max_trans_e", float("nan")))
+        hist_max_rot = float(ana_cfg.get("hist_max_rot_e", float("nan")))
+        max_trans_e_m = float(ana_cfg.get("max_trans_e_m", hist_max_trans))
+        max_rot_e_deg = float(ana_cfg.get("max_rot_e_deg", hist_max_rot))
+        plot_max_trans = 1.2 * hist_max_trans if math.isfinite(hist_max_trans) else float("nan")
+        plot_max_rot = 1.2 * hist_max_rot if math.isfinite(hist_max_rot) else float("nan")
+        penalty_trans = max_trans_e_m if math.isfinite(max_trans_e_m) else hist_max_trans
+        penalty_rot = max_rot_e_deg if math.isfinite(max_rot_e_deg) else hist_max_rot
+
+        te_raw, re_raw, nan_count, total_count = _load_pose_errors_rows(
+            path_obj, max_trans_e_m, max_rot_e_deg
+        )
+        te_vals.extend(_apply_pose_error_mode(te_raw, mode, plot_max_trans, penalty_trans))
+        re_vals.extend(_apply_pose_error_mode(re_raw, mode, plot_max_rot, penalty_rot))
+        nan_total += nan_count
+        total += total_count
     if not te_vals or not re_vals:
         raise RuntimeError("pose_errors files have no usable entries.")
-    return compute_stat(te_vals, stat), compute_stat(re_vals, stat)
+    nan_ratio = float("nan") if total == 0 else nan_total / total
+    return compute_stat(te_vals, stat), compute_stat(re_vals, stat), nan_ratio
 
 
 def compute_stat(values, stat):
@@ -124,21 +278,62 @@ def parse_schedule_last_alpha(schedule_str):
         return None
 
 
+def _resolve_ks_mode(mode):
+    if isinstance(mode, (int, float)):
+        return "const", float(mode)
+    if not isinstance(mode, str):
+        return None, None
+    token = mode.strip().lower()
+    if token in ("map", "mapped", "visibility", "from_visibility", "ks_from_visibility"):
+        return "map", None
+    if token.startswith("const"):
+        token = token.replace("const", "", 1)
+    try:
+        return "const", float(token)
+    except ValueError:
+        return None, None
+
+
 def build_search_space(trial, args):
     params = {}
     fixed = args.fixed_params or {}
-    if "max_iter" in fixed:
-        params["max_iter"] = fixed["max_iter"]
-    elif args.tune_max_iter:
-        params["max_iter"] = trial.suggest_int(
-            "max_iter", args.max_iter_range[0], args.max_iter_range[1]
+    fixed_ks = fixed.get("ks")
+    ks_mode_options = getattr(args, "ks_mode_options", None)
+    if "max_iteration" in fixed:
+        params["max_iteration"] = fixed["max_iteration"]
+    elif args.tune_max_iteration:
+        params["max_iteration"] = trial.suggest_int(
+            "max_iteration", args.max_iteration_range[0], args.max_iteration_range[1]
         )
-    if "ks" in fixed:
-        params["ks"] = fixed["ks"]
-    elif args.tune_ks and not args.ks_from_visibility:
-        params["ks"] = trial.suggest_float(
-            "ks", args.ks_range[0], args.ks_range[1], log=args.ks_log
-        )
+    if ks_mode_options:
+        mode = trial.suggest_categorical("ks_mode", ks_mode_options)
+        params["ks_mode"] = mode
+        mode_kind, mode_val = _resolve_ks_mode(mode)
+        if mode_kind == "const":
+            params["ks_from_visibility"] = False
+            params["ks"] = mode_val
+        elif mode_kind == "map":
+            params["ks_from_visibility"] = True
+            if "ks_transition_deg" in fixed:
+                params["ks_transition_deg"] = fixed["ks_transition_deg"]
+            elif args.tune_ks_transition_deg:
+                params["ks_transition_deg"] = trial.suggest_float(
+                    "ks_transition_deg",
+                    args.ks_transition_deg_range[0],
+                    args.ks_transition_deg_range[1],
+                )
+            else:
+                params["ks_transition_deg"] = args.ks_transition_deg
+        else:
+            raise SystemExit(f"Unknown ks_mode option: {mode}")
+    else:
+        if not args.ks_from_visibility:
+            if fixed_ks is not None:
+                params["ks"] = fixed_ks
+            elif args.tune_ks:
+                params["ks"] = trial.suggest_float(
+                    "ks", args.ks_range[0], args.ks_range[1], log=args.ks_log
+                )
     if "ks_transition_deg" in fixed:
         params["ks_transition_deg"] = fixed["ks_transition_deg"]
     elif args.tune_ks_transition_deg:
@@ -194,13 +389,13 @@ def build_search_space(trial, args):
         and params["min_step_deg"] > params["max_step_deg"]
     ):
         raise SystemExit("Resolved min_step_deg is greater than max_step_deg.")
-    if "traj_jac_step" in fixed:
-        params["traj_jac_step"] = fixed["traj_jac_step"]
-    elif args.tune_traj_jac_step:
-        params["traj_jac_step"] = trial.suggest_float(
-            "traj_jac_step",
-            args.traj_jac_step_range[0],
-            args.traj_jac_step_range[1],
+    if "trajectory_jacobian_step" in fixed:
+        params["trajectory_jacobian_step"] = fixed["trajectory_jacobian_step"]
+    elif args.tune_trajectory_jacobian_step:
+        params["trajectory_jacobian_step"] = trial.suggest_float(
+            "trajectory_jacobian_step",
+            args.trajectory_jacobian_step_range[0],
+            args.trajectory_jacobian_step_range[1],
         )
     if "step_norm_mode" in fixed:
         params["step_norm_mode"] = fixed["step_norm_mode"]
@@ -214,7 +409,8 @@ def build_search_space(trial, args):
         params["fov_schedule"] = trial.suggest_categorical(
             "fov_schedule", args.fov_schedule_options
         )
-    if args.ks_from_visibility and "ks" not in fixed:
+    ks_from_visibility = params.get("ks_from_visibility", args.ks_from_visibility)
+    if ks_from_visibility:
         alpha = None
         if "fov_schedule" in params:
             alpha = parse_schedule_last_alpha(params["fov_schedule"])
@@ -222,7 +418,7 @@ def build_search_space(trial, args):
         if alpha is not None and ks_transition_deg:
             ks_suggested = suggest_ks(alpha, ks_transition_deg)
             if ks_suggested is not None:
-                if args.tune_ks:
+                if args.tune_ks and not ks_mode_options:
                     mults = args.ks_visibility_range_multipliers
                     if (
                         isinstance(mults, (list, tuple))
@@ -245,10 +441,10 @@ def build_search_space(trial, args):
     return params
 
 
-def make_env(params, base_env):
+def make_env(params, base_env, args=None):
     env = dict(base_env)
-    if "max_iter" in params:
-        env["FOV_OPT_MAX_ITER"] = str(params["max_iter"])
+    if "max_iteration" in params:
+        env["FOV_OPT_MAX_ITERATION"] = str(params["max_iteration"])
     if "ks" in params:
         env["FOV_OPT_KS"] = f"{params['ks']:.8f}"
     if "base_step_scale" in params:
@@ -259,14 +455,29 @@ def make_env(params, base_env):
         env["FOV_OPT_MAX_STEP_DEG"] = f"{params['max_step_deg']:.8f}"
     if "step_norm_mode" in params:
         env["FOV_OPT_STEP_NORM_MODE"] = str(params["step_norm_mode"])
-    if "traj_jac_step" in params:
-        env["FOV_OPT_TRAJ_JAC_STEP"] = f"{params['traj_jac_step']:.8f}"
+    if "trajectory_jacobian_step" in params:
+        env["FOV_OPT_TRAJECTORY_JACOBIAN_STEP"] = (
+            f"{params['trajectory_jacobian_step']:.8f}"
+        )
     if "fov_schedule" in params:
         env["FOV_OPT_FOV_SCHEDULE"] = params["fov_schedule"]
+    ks_from_visibility = None
+    if "ks_from_visibility" in params:
+        ks_from_visibility = bool(params["ks_from_visibility"])
+    elif args is not None and getattr(args, "ks_from_visibility", False):
+        ks_from_visibility = True
+    if ks_from_visibility:
+        env["FOV_OPT_KS_FROM_VISIBILITY"] = "1"
+        ks_transition = params.get("ks_transition_deg", getattr(args, "ks_transition_deg", None))
+        if ks_transition is not None:
+            env["FOV_OPT_KS_TRANSITION_DEG"] = f"{float(ks_transition):.8f}"
     if args_warm_start_enabled := env.get("_FOV_OPT_WARM_START"):
         env["FOV_OPT_WARM_START"] = args_warm_start_enabled
     if warm_start_file := env.get("_FOV_OPT_WARM_START_FILE"):
         env["FOV_OPT_WARM_START_FILE"] = warm_start_file
+    if args is not None and getattr(args, "vis_weight", 0.0):
+        # Keep per-iteration quiver metrics so visibility improvement can be computed.
+        env["FOV_OPT_KEEP_METRICS"] = "1"
     return env
 
 
@@ -287,9 +498,14 @@ def _with_reg_image_limit(cmd, args):
         return cmd
     if "run_planner_exp.py" not in cmd:
         return cmd
-    if "--max_reg_images" in cmd:
-        return cmd
-    return "{} --max_reg_images {}".format(cmd, max_imgs)
+    # Apply per registration command when chained with &&.
+    parts = [p.strip() for p in cmd.split("&&")]
+    updated = []
+    for part in parts:
+        if "run_planner_exp.py" in part and "--max_reg_images" not in part:
+            part = "{} --max_reg_images {}".format(part, max_imgs)
+        updated.append(part)
+    return " && ".join(updated)
 
 
 def _with_render_options(cmd, args):
@@ -371,13 +587,19 @@ def _augment_reg_cmd_with_trial_paths(cmd, trace_root):
         if base_names:
             opt_specs = []
             for name in base_names:
-                opt_dir = Path(trace_root) / name / f"{name}_none" / "optimized"
+                opt_dir = Path(trace_root) / name / f"{name}_none" / "optimized_path_yaw"
                 opt_specs.append(f"{name}={opt_dir}")
             tokens += ["--optimized_dirs"] + opt_specs
     return " ".join(shlex.quote(tok) for tok in tokens)
 
 
 def run_trial_pipeline(trial_id, args, env, workdir):
+    times = {
+        "optimization_sec": None,
+        "registration_sec": None,
+        "pipeline_sec": None,
+    }
+    pipeline_start = time.time()
     has_split_cmd = bool(
         args.run_cmd_optimization
         or args.run_cmd_registration_along_path
@@ -387,7 +609,11 @@ def run_trial_pipeline(trial_id, args, env, workdir):
         if args.trial_log:
             print("[trial {}] run pipeline".format(trial_id))
         run_trial_command(args.run_cmd, workdir, env, args.quiet_subprocess)
-        return
+        times["pipeline_sec"] = time.time() - pipeline_start
+        if args.trial_log:
+            print("[trial {}] pipeline done ({:.2f}s)".format(
+                trial_id, times["pipeline_sec"]))
+        return times
 
     reg_cmd = (
         args.run_cmd_registration_along_path
@@ -401,7 +627,12 @@ def run_trial_pipeline(trial_id, args, env, workdir):
     reg_cmd = _with_render_options(reg_cmd, args)
     if args.trial_log:
         print("[trial {}] optimization start".format(trial_id))
+    opt_start = time.time()
     run_trial_command(args.run_cmd_optimization, workdir, env, args.quiet_subprocess)
+    times["optimization_sec"] = time.time() - opt_start
+    if args.trial_log:
+        print("[trial {}] optimization done ({:.2f}s)".format(
+            trial_id, times["optimization_sec"]))
     if args.trial_log:
         max_imgs = int(getattr(args, "max_reg_images_per_trial", 0) or 0)
         if max_imgs > 0:
@@ -409,24 +640,124 @@ def run_trial_pipeline(trial_id, args, env, workdir):
                 trial_id, max_imgs))
         else:
             print("[trial {}] registration start".format(trial_id))
+    reg_start = time.time()
     run_trial_command(reg_cmd, workdir, env, args.quiet_subprocess)
+    times["registration_sec"] = time.time() - reg_start
+    times["pipeline_sec"] = time.time() - pipeline_start
+    if args.trial_log:
+        print("[trial {}] registration done ({:.2f}s)".format(
+            trial_id, times["registration_sec"]))
+        print("[trial {}] pipeline done ({:.2f}s)".format(
+            trial_id, times["pipeline_sec"]))
+    return times
 
 
 def load_metrics(args, error_stat_path, pose_errors_path,
                  error_stat_files=None, pose_errors_files=None):
+    mode = getattr(args, "pose_error_mode", "finite")
+    if mode not in POSE_ERROR_MODES:
+        mode = "finite"
+    base_cfg = _resolve_base_cfg(args)
     if error_stat_files is None:
         error_stat_files = args.error_stat_files
     if pose_errors_files is None:
         pose_errors_files = args.pose_errors_files
     if error_stat_files:
-        return parse_error_stat_files(error_stat_files, args.stat)
+        if mode != "finite":
+            print(
+                "Warning: pose_error_mode is {}, but error_stat files do not support penalized/original handling. "
+                "Using error_stat as-is.".format(mode),
+                file=sys.stderr,
+            )
+        te, re = parse_error_stat_files(error_stat_files, args.stat)
+        return te, re, float("nan")
     if pose_errors_files:
-        return parse_pose_errors_files(pose_errors_files, args.stat)
+        return parse_pose_errors_files(pose_errors_files, args.stat, mode, base_cfg)
     if error_stat_path and error_stat_path.exists():
-        return parse_error_stat(error_stat_path, args.stat)
+        if mode != "finite":
+            print(
+                "Warning: pose_error_mode is {}, but error_stat does not support penalized/original handling. "
+                "Using error_stat as-is.".format(mode),
+                file=sys.stderr,
+            )
+        te, re = parse_error_stat(error_stat_path, args.stat)
+        return te, re, float("nan")
     if pose_errors_path and pose_errors_path.exists():
-        return parse_pose_errors(pose_errors_path, args.stat)
+        return parse_pose_errors(pose_errors_path, args.stat, mode, base_cfg)
     raise RuntimeError("No error file found after run.")
+
+
+def _parse_quiver_metrics(path: Path, metric: str):
+    # Each non-empty line: x,y,z,dx,dy,dz,vis_count,vis_score
+    # Empty lines separate iterations.
+    values = []
+    cur = []
+    with path.open("r", encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line:
+                if cur:
+                    values.append(sum(cur) / len(cur))
+                    cur = []
+                continue
+            parts = [p for p in line.replace(",", " ").split() if p]
+            if len(parts) < 8:
+                continue
+            try:
+                vis_count = float(parts[6])
+                vis_score = float(parts[7])
+            except ValueError:
+                continue
+            if metric == "vis30_score":
+                cur.append(vis_score)
+            else:
+                cur.append(vis_count)
+    if cur:
+        values.append(sum(cur) / len(cur))
+    return values
+
+
+def compute_visibility_improvement(roots, pattern, metric, mode):
+    if not roots:
+        return None
+    if isinstance(roots, (str, Path)):
+        roots = [roots]
+    improvements = []
+    for root in roots:
+        root_path = Path(root).expanduser().resolve()
+        if not root_path.exists():
+            continue
+        for metrics_path in root_path.rglob(pattern):
+            try:
+                series = _parse_quiver_metrics(metrics_path, metric)
+            except OSError:
+                continue
+            if len(series) < 2:
+                continue
+            first = series[0]
+            last = series[-1]
+            if mode == "ratio":
+                denom = first if abs(first) > 1e-6 else 1.0
+                improvements.append((last - first) / denom)
+            else:
+                improvements.append(last - first)
+    if not improvements:
+        return None
+    return sum(improvements) / len(improvements)
+
+
+def resolve_vis_roots(args, env):
+    env_root = None
+    if env:
+        env_root = env.get("FOV_TRACE_ROOT")
+    if env_root:
+        return [env_root]
+    roots = getattr(args, "vis_trace_root", None)
+    if not roots:
+        return []
+    if isinstance(roots, (str, Path)):
+        return [roots]
+    return list(roots)
 
 
 def load_yaml_config(path: Path):
@@ -470,11 +801,12 @@ def _write_trials_csv(path: Path, trials):
         row = {k: params.get(k, "") for k in param_keys}
         row["te"] = t.user_attrs.get("te")
         row["re"] = t.user_attrs.get("re")
+        row["vis_improvement"] = t.user_attrs.get("vis_improvement")
         rows.append(row)
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = param_keys + ["te", "re"]
+    fieldnames = param_keys + ["te", "re", "vis_improvement"]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -484,6 +816,7 @@ def _write_trials_csv(path: Path, trials):
 def normalize_fixed_params(raw):
     if not isinstance(raw, dict):
         return {}
+    raw = _apply_legacy_aliases_dict(raw)
     return {k: v for k, v in raw.items() if k in SUPPORTED_FIXED_PARAMS}
 
 
@@ -503,6 +836,11 @@ def validate_config(args):
     missing = []
     fixed = args.fixed_params or {}
     mode = getattr(args, "mode", None)
+    pose_mode = getattr(args, "pose_error_mode", "finite")
+    if pose_mode not in POSE_ERROR_MODES:
+        raise SystemExit(
+            f"pose_error_mode must be one of {sorted(POSE_ERROR_MODES)} (got {pose_mode})."
+        )
 
     def require(name):
         if not hasattr(args, name) or getattr(args, name) is None:
@@ -531,13 +869,13 @@ def validate_config(args):
         "re_weight",
         "trial_dir_root",
         "log_jacobian",
-        "tune_max_iter",
+        "tune_max_iteration",
         "tune_ks",
         "tune_ks_transition_deg",
         "tune_base_step",
         "tune_min_step_deg",
         "tune_max_step_deg",
-        "tune_traj_jac_step",
+        "tune_trajectory_jacobian_step",
         "tune_step_norm_mode",
         "tune_fov_schedule",
         "ks_from_visibility",
@@ -563,8 +901,8 @@ def validate_config(args):
         if not isinstance(fixed, dict) or not any(k in fixed for k in supported):
             missing.append("fixed_params (with at least one supported key)")
 
-    if args.tune_max_iter and "max_iter" not in fixed:
-        require("max_iter_range")
+    if args.tune_max_iteration and "max_iteration" not in fixed:
+        require("max_iteration_range")
     if args.tune_base_step and "base_step_scale" not in fixed:
         require("base_step_scale_range")
         require("base_step_scale_log")
@@ -572,17 +910,24 @@ def validate_config(args):
         require("min_step_deg_range")
     if args.tune_max_step_deg and "max_step_deg" not in fixed:
         require("max_step_deg_range")
-    if args.tune_traj_jac_step and "traj_jac_step" not in fixed:
-        require("traj_jac_step_range")
+    if args.tune_trajectory_jacobian_step and "trajectory_jacobian_step" not in fixed:
+        require("trajectory_jacobian_step_range")
     if args.tune_step_norm_mode and "step_norm_mode" not in fixed:
         require("step_norm_mode_options")
     if args.tune_fov_schedule and "fov_schedule" not in fixed:
         require("fov_schedule_options")
 
-    if args.tune_ks and "ks" not in fixed:
-        require("ks_log")
-        if not args.ks_from_visibility:
-            require("ks_range")
+    ks_mode_options = getattr(args, "ks_mode_options", None)
+    if ks_mode_options:
+        if not isinstance(ks_mode_options, (list, tuple)) or not ks_mode_options:
+            raise SystemExit("ks_mode_options must be a non-empty list.")
+        if any(_resolve_ks_mode(opt)[0] == "map" for opt in ks_mode_options):
+            require("ks_transition_deg")
+    else:
+        if args.tune_ks and "ks" not in fixed:
+            require("ks_log")
+            if not args.ks_from_visibility:
+                require("ks_range")
     if args.tune_ks_transition_deg and "ks_transition_deg" not in fixed:
         require("ks_transition_deg_range")
     if args.ks_from_visibility:
@@ -624,13 +969,25 @@ def validate_config(args):
         raise SystemExit("fixed_params must be a mapping of param names to values.")
     if args.initial_params is not None and not isinstance(args.initial_params, dict):
         raise SystemExit("initial_params must be a mapping of param names to values.")
+    if args.ks_from_visibility and isinstance(fixed, dict) and "ks" in fixed:
+        print(
+            "Warning: ks_from_visibility is enabled; fixed_params['ks'] will be ignored.",
+            file=sys.stderr,
+        )
+    if getattr(args, "ks_mode_options", None) and isinstance(fixed, dict) and "ks" in fixed:
+        print(
+            "Warning: ks_mode_options is enabled; fixed_params['ks'] will be ignored.",
+            file=sys.stderr,
+        )
 
 
 def _tunable_keys(args, fixed):
     keys = []
-    if args.tune_max_iter and "max_iter" not in fixed:
-        keys.append("max_iter")
-    if args.tune_ks and "ks" not in fixed:
+    if args.tune_max_iteration and "max_iteration" not in fixed:
+        keys.append("max_iteration")
+    if getattr(args, "ks_mode_options", None):
+        keys.append("ks_mode")
+    elif args.tune_ks and "ks" not in fixed:
         keys.append("ks")
     if args.tune_ks_transition_deg and "ks_transition_deg" not in fixed:
         keys.append("ks_transition_deg")
@@ -640,8 +997,8 @@ def _tunable_keys(args, fixed):
         keys.append("min_step_deg")
     if args.tune_max_step_deg and "max_step_deg" not in fixed:
         keys.append("max_step_deg")
-    if args.tune_traj_jac_step and "traj_jac_step" not in fixed:
-        keys.append("traj_jac_step")
+    if args.tune_trajectory_jacobian_step and "trajectory_jacobian_step" not in fixed:
+        keys.append("trajectory_jacobian_step")
     if args.tune_step_norm_mode and "step_norm_mode" not in fixed:
         keys.append("step_norm_mode")
     if args.tune_fov_schedule and "fov_schedule" not in fixed:
@@ -662,18 +1019,18 @@ def _validate_initial_params(args, fixed):
             raise SystemExit(
                 f"initial_params[{name}]={value} out of range [{rmin}, {rmax}]"
             )
-    max_iter_range = getattr(args, "max_iter_range", None)
+    max_iteration_range = getattr(args, "max_iteration_range", None)
     ks_range = getattr(args, "ks_range", None)
     ks_transition_deg_range = getattr(args, "ks_transition_deg_range", None)
     base_step_scale_range = getattr(args, "base_step_scale_range", None)
     min_step_deg_range = getattr(args, "min_step_deg_range", None)
     max_step_deg_range = getattr(args, "max_step_deg_range", None)
-    traj_jac_step_range = getattr(args, "traj_jac_step_range", None)
+    trajectory_jacobian_step_range = getattr(args, "trajectory_jacobian_step_range", None)
     step_norm_mode_options = getattr(args, "step_norm_mode_options", None)
     fov_schedule_options = getattr(args, "fov_schedule_options", None)
 
-    if "max_iter" in initial and max_iter_range:
-        in_range("max_iter", initial["max_iter"], max_iter_range[0], max_iter_range[1])
+    if "max_iteration" in initial and max_iteration_range:
+        in_range("max_iteration", initial["max_iteration"], max_iteration_range[0], max_iteration_range[1])
     if "ks" in initial and ks_range and not args.ks_from_visibility:
         in_range("ks", initial["ks"], ks_range[0], ks_range[1])
     if "ks_transition_deg" in initial and ks_transition_deg_range:
@@ -704,12 +1061,12 @@ def _validate_initial_params(args, fixed):
             max_step_deg_range[0],
             max_step_deg_range[1],
         )
-    if "traj_jac_step" in initial and traj_jac_step_range:
+    if "trajectory_jacobian_step" in initial and trajectory_jacobian_step_range:
         in_range(
-            "traj_jac_step",
-            initial["traj_jac_step"],
-            traj_jac_step_range[0],
-            traj_jac_step_range[1],
+            "trajectory_jacobian_step",
+            initial["trajectory_jacobian_step"],
+            trajectory_jacobian_step_range[0],
+            trajectory_jacobian_step_range[1],
         )
     if "step_norm_mode" in initial and step_norm_mode_options:
         if initial["step_norm_mode"] not in step_norm_mode_options:
@@ -728,6 +1085,49 @@ def _validate_initial_params(args, fixed):
     ):
         raise SystemExit("initial_params min_step_deg must be <= max_step_deg.")
     return initial
+
+
+def _existing_categorical_choices(study, param_name):
+    for trial in study.trials:
+        dist = trial.distributions.get(param_name)
+        if dist is None:
+            continue
+        if isinstance(dist, optuna.distributions.CategoricalDistribution):
+            return list(dist.choices)
+    return None
+
+
+def _sync_categorical_options_with_study(study, args, param_name, options_attr, enabled):
+    if not enabled:
+        return
+    options = getattr(args, options_attr, None)
+    existing = _existing_categorical_choices(study, param_name)
+    if not existing:
+        return
+    if options is None:
+        setattr(args, options_attr, list(existing))
+        print(
+            f"Warning: Using existing study {param_name} options {existing} (config missing).",
+            file=sys.stderr,
+        )
+        return
+    if list(options) == list(existing):
+        return
+    try:
+        if set(options) == set(existing):
+            setattr(args, options_attr, list(existing))
+            print(
+                f"Warning: Reordered {param_name} options to match existing study: {existing}.",
+                file=sys.stderr,
+            )
+            return
+    except TypeError:
+        pass
+    raise SystemExit(
+        f"Existing study uses {param_name} options {existing}, "
+        f"but config provides {list(options)}. "
+        "Use the same options/order or start a new study."
+    )
 
 
 def main():
@@ -752,14 +1152,39 @@ def main():
     parser.add_argument("--multi-objective", action="store_true", default=None)
     parser.add_argument("--te-weight", type=float)
     parser.add_argument("--re-weight", type=float)
+    parser.add_argument("--vis-weight", type=float)
+    parser.add_argument("--vis-metric", choices=["vis30_count", "vis30_score"])
+    parser.add_argument("--vis-improvement", choices=["delta", "ratio"])
+    parser.add_argument("--vis-trace-root", nargs="+")
+    parser.add_argument("--vis-pattern")
+    parser.add_argument("--results-jsonl")
+    parser.add_argument("--results-csv")
+    parser.add_argument("--best-params-yaml")
+    parser.add_argument("--pareto-params-yaml")
     parser.add_argument("--trial-dir-root", help="Optional base dir for trial outputs.")
     parser.add_argument("--log-jacobian", type=int, choices=[0, 1])
 
-    parser.add_argument("--tune-max-iter", action="store_true", default=None)
-    parser.add_argument("--max-iter-range", type=int, nargs=2)
+    parser.add_argument("--ks-from-visibility", action="store_true", default=None)
+    parser.add_argument("--no-ks-from-visibility", action="store_false", dest="ks_from_visibility", default=None)
+
+    parser.add_argument(
+        "--tune-max-iteration",
+        "--tune-max-iter",
+        dest="tune_max_iteration",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--max-iteration-range",
+        "--max-iter-range",
+        dest="max_iteration_range",
+        type=int,
+        nargs=2,
+    )
     parser.add_argument("--tune-ks", action="store_true", default=None)
     parser.add_argument("--ks-range", type=float, nargs=2)
     parser.add_argument("--ks-log", action="store_true", default=None)
+    parser.add_argument("--ks-mode-options", nargs="+")
     parser.add_argument("--tune-ks-transition-deg", action="store_true", default=None)
     parser.add_argument("--ks-transition-deg-range", type=float, nargs=2)
     parser.add_argument("--tune-base-step", action="store_true", default=None)
@@ -769,8 +1194,20 @@ def main():
     parser.add_argument("--min-step-deg-range", type=float, nargs=2)
     parser.add_argument("--tune-max-step-deg", action="store_true", default=None)
     parser.add_argument("--max-step-deg-range", type=float, nargs=2)
-    parser.add_argument("--tune-traj-jac-step", action="store_true", default=None)
-    parser.add_argument("--traj-jac-step-range", type=float, nargs=2)
+    parser.add_argument(
+        "--tune-trajectory-jacobian-step",
+        "--tune-traj-jac-step",
+        dest="tune_trajectory_jacobian_step",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--trajectory-jacobian-step-range",
+        "--traj-jac-step-range",
+        dest="trajectory_jacobian_step_range",
+        type=float,
+        nargs=2,
+    )
     parser.add_argument("--tune-step-norm-mode", action="store_true", default=None)
     parser.add_argument("--step-norm-mode-options", nargs="+")
     parser.add_argument("--tune-fov-schedule", action="store_true", default=None)
@@ -792,10 +1229,14 @@ def main():
         if value is not None:
             merged[key] = value
 
+    merged = _apply_config_aliases(merged)
+
     args = argparse.Namespace(**merged)
 
     if args.along_path is None:
         args.along_path = False
+    if not hasattr(args, "fixed_params") or args.fixed_params is None:
+        args.fixed_params = {}
 
     if args.trial_log is None:
         args.trial_log = True
@@ -809,6 +1250,24 @@ def main():
         args.render_sleep_tune = None
     if not hasattr(args, "results_csv") or args.results_csv is None:
         args.results_csv = ""
+    if not hasattr(args, "vis_weight") or args.vis_weight is None:
+        args.vis_weight = 0.0
+    if not hasattr(args, "vis_metric") or args.vis_metric is None:
+        args.vis_metric = "vis30_count"
+    if not hasattr(args, "vis_improvement") or args.vis_improvement is None:
+        args.vis_improvement = "delta"
+    if not hasattr(args, "vis_pattern") or args.vis_pattern is None:
+        args.vis_pattern = "quivers_path_yaw_metrics.txt"
+    if not hasattr(args, "pose_error_mode") or args.pose_error_mode is None:
+        args.pose_error_mode = "finite"
+    if not hasattr(args, "base_analysis_cfg") or args.base_analysis_cfg is None:
+        args.base_analysis_cfg = str(
+            Path(__file__).resolve().parents[1]
+            / "act_map_exp"
+            / "params"
+            / "quad_rrt"
+            / "base_analysis_cfg.yaml"
+        )
 
     if not hasattr(args, "enqueue_initial") or args.enqueue_initial is None:
         args.enqueue_initial = False
@@ -861,13 +1320,13 @@ def main():
                 args.fixed_params = normalize_fixed_params(best_data.get("fixed_params"))
 
     if args.mode == "fixed":
-        args.tune_max_iter = False
+        args.tune_max_iteration = False
         args.tune_ks = False
         args.tune_ks_transition_deg = False
         args.tune_base_step = False
         args.tune_min_step_deg = False
         args.tune_max_step_deg = False
-        args.tune_traj_jac_step = False
+        args.tune_trajectory_jacobian_step = False
         args.tune_step_norm_mode = False
         args.tune_fov_schedule = False
 
@@ -884,7 +1343,7 @@ def main():
         base_env["_FOV_OPT_WARM_START"] = "1" if args.warm_start else "0"
         if args.warm_start_file:
             base_env["_FOV_OPT_WARM_START_FILE"] = args.warm_start_file
-        env = make_env(params, base_env)
+        env = make_env(params, base_env, args)
         env["FOV_OPT_LOG_JACOBIAN"] = str(args.log_jacobian)
 
         if trial_root:
@@ -898,7 +1357,7 @@ def main():
         start = time.time()
         if args.trial_log:
             print("[fixed] start")
-        run_trial_pipeline("fixed", args, env, workdir)
+        pipeline_times = run_trial_pipeline("fixed", args, env, workdir)
         trace_root = env.get("FOV_TRACE_ROOT")
         error_stat_files = _rewrite_trace_paths(args.error_stat_files, trace_root)
         pose_errors_files = _rewrite_trace_paths(args.pose_errors_files, trace_root)
@@ -906,15 +1365,25 @@ def main():
             error_stat_path = Path(_rewrite_trace_paths([str(error_stat_path)], trace_root)[0])
         if pose_errors_path and trace_root:
             pose_errors_path = Path(_rewrite_trace_paths([str(pose_errors_path)], trace_root)[0])
-        te, re = load_metrics(
+        te, re, nan_ratio = load_metrics(
             args,
             error_stat_path,
             pose_errors_path,
             error_stat_files=error_stat_files,
             pose_errors_files=pose_errors_files,
         )
+        vis_improvement = None
+        if args.vis_weight:
+            roots = resolve_vis_roots(args, env)
+            vis_improvement = compute_visibility_improvement(
+                roots, args.vis_pattern, args.vis_metric, args.vis_improvement
+            )
+            if vis_improvement is None:
+                vis_improvement = 0.0
         elapsed = time.time() - start
-        objective = te if args.multi_objective else (args.te_weight * te + args.re_weight * re)
+        if pipeline_times and pipeline_times.get("pipeline_sec") is not None:
+            elapsed = pipeline_times["pipeline_sec"]
+        objective = te if args.multi_objective else (args.te_weight * te + args.re_weight * re - args.vis_weight * (vis_improvement or 0.0))
 
         if args.trial_log:
             print("[fixed] obj={} te={} re={} elapsed={:.2f}s".format(
@@ -923,6 +1392,10 @@ def main():
                 "{:.6f}".format(re),
                 elapsed,
             ))
+            if math.isfinite(nan_ratio):
+                print("[fixed] nan_ratio={:.3f}".format(nan_ratio))
+            if args.vis_weight:
+                print("[fixed] vis_improvement={:.6f}".format(vis_improvement or 0.0))
             print("[fixed] params {}".format(params))
 
         if args.results_jsonl:
@@ -933,7 +1406,15 @@ def main():
                 "value": objective if not args.multi_objective else None,
                 "values": [te, re] if args.multi_objective else None,
                 "params": params,
-                "user_attrs": {"te": te, "re": re, "elapsed_sec": elapsed},
+                "user_attrs": {
+                    "te": te,
+                    "re": re,
+                    "vis_improvement": vis_improvement,
+                    "elapsed_sec": elapsed,
+                    "optimization_sec": (pipeline_times or {}).get("optimization_sec"),
+                    "registration_sec": (pipeline_times or {}).get("registration_sec"),
+                    "pipeline_sec": (pipeline_times or {}).get("pipeline_sec"),
+                },
             }
             with results_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record) + "\n")
@@ -942,7 +1423,7 @@ def main():
                 "mode": "fixed",
                 "fixed_params": normalize_fixed_params(params),
                 "best_value": objective if not args.multi_objective else None,
-                "metrics": {"te": te, "re": re},
+                "metrics": {"te": te, "re": re, "vis_improvement": vis_improvement, "nan_ratio": nan_ratio},
                 "study_name": args.study_name,
             }
             write_yaml_config(Path(args.best_params_yaml), payload)
@@ -971,6 +1452,28 @@ def main():
         )
 
     fixed = args.fixed_params or {}
+    _sync_categorical_options_with_study(
+        study,
+        args,
+        "step_norm_mode",
+        "step_norm_mode_options",
+        enabled=bool(args.tune_step_norm_mode and "step_norm_mode" not in fixed),
+    )
+    _sync_categorical_options_with_study(
+        study,
+        args,
+        "fov_schedule",
+        "fov_schedule_options",
+        enabled=bool(args.tune_fov_schedule and "fov_schedule" not in fixed),
+    )
+    _sync_categorical_options_with_study(
+        study,
+        args,
+        "ks_mode",
+        "ks_mode_options",
+        enabled=bool(getattr(args, "ks_mode_options", None)),
+    )
+
     initial = _validate_initial_params(args, fixed)
     if initial:
         study.enqueue_trial(initial)
@@ -982,7 +1485,7 @@ def main():
         base_env["_FOV_OPT_WARM_START"] = "1" if args.warm_start else "0"
         if args.warm_start_file:
             base_env["_FOV_OPT_WARM_START_FILE"] = args.warm_start_file
-        env = make_env(params, base_env)
+        env = make_env(params, base_env, args)
         env["FOV_OPT_LOG_JACOBIAN"] = str(args.log_jacobian)
 
         trial_dir = None
@@ -997,8 +1500,10 @@ def main():
         start = time.time()
         if args.trial_log:
             print("[trial {}] start".format(trial.number))
-        run_trial_pipeline(trial.number, args, env, workdir)
+        pipeline_times = run_trial_pipeline(trial.number, args, env, workdir)
         elapsed = time.time() - start
+        if pipeline_times and pipeline_times.get("pipeline_sec") is not None:
+            elapsed = pipeline_times["pipeline_sec"]
         trace_root = env.get("FOV_TRACE_ROOT")
         error_stat_files = _rewrite_trace_paths(args.error_stat_files, trace_root)
         pose_errors_files = _rewrite_trace_paths(args.pose_errors_files, trace_root)
@@ -1013,21 +1518,39 @@ def main():
                 _rewrite_trace_paths([str(pose_errors_path_local)], trace_root)[0]
             )
 
-        te, re = load_metrics(
+        te, re, nan_ratio = load_metrics(
             args,
             error_stat_path_local,
             pose_errors_path_local,
             error_stat_files=error_stat_files,
             pose_errors_files=pose_errors_files,
         )
+        vis_improvement = None
+        if args.vis_weight:
+            roots = resolve_vis_roots(args, env)
+            vis_improvement = compute_visibility_improvement(
+                roots, args.vis_pattern, args.vis_metric, args.vis_improvement
+            )
+            if vis_improvement is None:
+                vis_improvement = 0.0
 
         trial.set_user_attr("te", te)
         trial.set_user_attr("re", re)
+        if math.isfinite(nan_ratio):
+            trial.set_user_attr("nan_ratio", nan_ratio)
+        trial.set_user_attr("vis_improvement", vis_improvement)
         trial.set_user_attr("elapsed_sec", elapsed)
+        if pipeline_times:
+            trial.set_user_attr("optimization_sec", pipeline_times.get("optimization_sec"))
+            trial.set_user_attr("registration_sec", pipeline_times.get("registration_sec"))
+            trial.set_user_attr("pipeline_sec", pipeline_times.get("pipeline_sec"))
         if trial_dir:
             trial.set_user_attr("trial_dir", str(trial_dir))
 
-        trial.set_user_attr("objective", te if args.multi_objective else (args.te_weight * te + args.re_weight * re))
+        trial.set_user_attr(
+            "objective",
+            te if args.multi_objective else (args.te_weight * te + args.re_weight * re - args.vis_weight * (vis_improvement or 0.0)),
+        )
         if args.trial_log:
             current_obj = trial.user_attrs.get("objective")
             best_obj = None
@@ -1042,18 +1565,22 @@ def main():
                 "alpha={}".format("{:.3f}".format(vis_alpha) if vis_alpha is not None else "n/a"),
             ]
             print(" ".join(log_parts))
+            if math.isfinite(nan_ratio):
+                print("[trial {}] nan_ratio={:.3f}".format(trial.number, nan_ratio))
+            if args.vis_weight:
+                print("[trial {}] vis_improvement={:.6f}".format(trial.number, vis_improvement or 0.0))
             # Print key params in a compact one-line dict.
             compact = {
                 k: params.get(k)
                 for k in (
-                    "max_iter",
+                    "max_iteration",
                     "ks",
                     "ks_transition_deg",
                     "base_step_scale",
                     "min_step_deg",
                     "max_step_deg",
                     "step_norm_mode",
-                    "traj_jac_step",
+                    "trajectory_jacobian_step",
                     "fov_schedule",
                 )
                 if k in params
@@ -1061,7 +1588,7 @@ def main():
             print("[trial {}] params {}".format(trial.number, compact))
         if args.multi_objective:
             return te, re
-        return args.te_weight * te + args.re_weight * re
+        return args.te_weight * te + args.re_weight * re - args.vis_weight * (vis_improvement or 0.0)
 
     study.optimize(
         objective,
