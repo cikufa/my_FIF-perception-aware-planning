@@ -237,6 +237,18 @@ if __name__ == '__main__':
 
     parser.add_argument('--no_clear_output', action='store_false', dest='clear_output')
 
+    parser.add_argument(
+        '--mode', choices=['plan', 'reg', 'eval', 'all'], default=None,
+        help="convenience shortcut that sets the skip_* flags consistently:\n"
+             "  plan -> plan only (skip render/reg/eval); does not require "
+             "--base_model / --colmap_script_dir\n"
+             "  reg  -> skip planning; render + register + evaluate (the default "
+             "registration pipeline)\n"
+             "  eval -> skip plan/render/reg; only recompute pose errors from "
+             "existing registrations\n"
+             "  all  -> do everything (plan + render + register + evaluate)\n"
+             "If --mode is given it overrides the individual --skip_* flags.")
+
     parser.add_argument('--skip_plan', action='store_true', dest='skip_plan')
     parser.add_argument('--skip_render', action='store_true', dest='skip_render')
     parser.add_argument('--skip_reg', action='store_true', dest='skip_reg')
@@ -292,6 +304,18 @@ if __name__ == '__main__':
     VERBOSE = bool(args.verbose)
     PROGRESS = bool(args.progress)
     SHOW_SUBPROCESS = bool(args.show_subprocess)
+
+    # --mode is a shortcut that overrides all skip_* flags together.
+    if args.mode is not None:
+        plan_stages = {
+            'plan': (False, True,  True,  True),
+            'reg':  (True,  False, False, False),
+            'eval': (True,  True,  True,  False),
+            'all':  (False, False, False, False),
+        }
+        (args.skip_plan, args.skip_render,
+         args.skip_reg, args.skip_eval) = plan_stages[args.mode]
+
     if args.defaults_yaml:
         if not os.path.exists(args.defaults_yaml):
             parser.error("defaults_yaml does not exist: {}".format(args.defaults_yaml))
@@ -313,10 +337,20 @@ if __name__ == '__main__':
                 args.optimized_dirs = [opt_from_defaults]
     if not args.top_outdir:
         parser.error("--top_outdir is required (or set it in --defaults_yaml)")
-    if not args.colmap_script_dir:
-        parser.error("--colmap_script_dir is required (or set it in --defaults_yaml)")
-    if not args.base_model:
-        parser.error("--base_model is required (or set it in --defaults_yaml)")
+
+    # Planning does not need COLMAP / base model. Only require them when any
+    # of render / register / evaluate will actually run.
+    needs_colmap = not (args.skip_render and args.skip_reg and args.skip_eval)
+    plan_only = (not args.skip_plan) and (not needs_colmap)
+
+    if needs_colmap:
+        if not args.colmap_script_dir:
+            parser.error("--colmap_script_dir is required for render/reg/eval "
+                         "(or set it in --defaults_yaml, or use --mode plan)")
+        if not args.base_model:
+            parser.error("--base_model is required for render/reg/eval "
+                         "(or set it in --defaults_yaml, or use --mode plan)")
+
     opt_named, opt_list = _parse_optimized_dir_specs(args.optimized_dirs)
     if args.optimized_dir:
         if opt_named or opt_list:
@@ -332,22 +366,32 @@ if __name__ == '__main__':
     if args.only_optimized and args.skip_optimized:
         parser.error("--only_optimized and --skip_optimized are mutually exclusive")
 
+    # Planning produces variation outputs; --only_optimized / --only_along_path
+    # operate on post-planning artifacts, so they conflict with plan-only runs.
+    if plan_only and (args.only_optimized or args.only_along_path):
+        parser.error("--only_optimized / --only_along_path are meaningless when "
+                     "only planning (use --mode all to plan + post-process)")
+
     # if args.skip_render or args.skip_plan or args.skip_reg:
     #     print(Fore.YELLOW + "Not clearing stuff due to skipping steps.") 
     #     args.clear_output = False
 
-    assert os.path.exists(args.colmap_script_dir)
-    ren_list_sc = os.path.join(args.colmap_script_dir, 'my_render_ue.py')
-    assert os.path.exists(ren_list_sc)
-    gen_list_sc = os.path.join(args.colmap_script_dir, 'generate_img_rel_path.py')
-    assert os.path.exists(gen_list_sc)
-    reg_sc = os.path.join(args.colmap_script_dir, 'register_images_to_model.py')
-    assert os.path.exists(reg_sc)
-    cal_e_sc = os.path.join(args.colmap_script_dir, 'calculate_pose_errors.py')
-    assert os.path.exists(cal_e_sc)
-    assert os.path.exists(args.base_model)
-    base_img_dir = os.path.join(args.base_model, 'images')
-    assert os.path.exists(base_img_dir)
+    if needs_colmap:
+        assert os.path.exists(args.colmap_script_dir)
+        ren_list_sc = os.path.join(args.colmap_script_dir, 'my_render_ue.py')
+        assert os.path.exists(ren_list_sc)
+        gen_list_sc = os.path.join(args.colmap_script_dir, 'generate_img_rel_path.py')
+        assert os.path.exists(gen_list_sc)
+        reg_sc = os.path.join(args.colmap_script_dir, 'register_images_to_model.py')
+        assert os.path.exists(reg_sc)
+        cal_e_sc = os.path.join(args.colmap_script_dir, 'calculate_pose_errors.py')
+        assert os.path.exists(cal_e_sc)
+        assert os.path.exists(args.base_model)
+        base_img_dir = os.path.join(args.base_model, 'images')
+        assert os.path.exists(base_img_dir)
+    else:
+        ren_list_sc = gen_list_sc = reg_sc = cal_e_sc = None
+        base_img_dir = None
     script_dir = os.path.dirname(os.path.abspath(__file__))
     gen_path_yaw_sc = os.path.join(script_dir, 'generate_path_yaw.py')
 
@@ -534,35 +578,65 @@ if __name__ == '__main__':
                                     os.path.join(outdir_i, 'rrt_stats.txt'))
                     _copy_if_exists(os.path.join(base_none_dir, 'rrt_plan_time_sec.txt'),
                                     os.path.join(outdir_i, 'rrt_plan_time_sec.txt'))
-#________________________________________________________________________________________________________________
 
-                # print(Fore.YELLOW + "Step 1: plan and save")
-                # if not args.skip_plan:
-                #     cfg_i = os.path.join(outdir_i, var_nm_i+".yaml")
-                #     params_i = base_params.copy()
-                #     params_i.update(var_opts_i)
-                #     params_i['save_traj_abs_dir'] = outdir_i
-                #     params_i['save_abs_dir'] = outdir_i
-                #     with open(cfg_i, 'w') as f:
-                #         yaml.dump(params_i, f, default_flow_style=False)
-                #     print("- cfg: {}".format(cfg_i))
-                #     set_planner_cmd = ("""rosservice call /{}/set_planner_state"""
-                #                        """ "config: '{}'" """.format(var_opts_i['node'], cfg_i))
-                #     print(Fore.BLUE + set_planner_cmd)
-                #     subprocess.call(shlex.split(set_planner_cmd))
-                #     call_planner_cmd = "rosservice call /{}/plan_vis_save".format(var_opts_i['node'])
-                #     print(Fore.BLUE + call_planner_cmd)
-                #     subprocess.call(shlex.split(call_planner_cmd))
+                # ---- Step 1: plan a trajectory via the ROS planner node -----
+                # Only runs for variation entries (cfg_fn is not None). along_path
+                # and optimized_path_yaw entries are post-planning artefacts, so
+                # there is nothing to plan for them.
+                is_variation = (var_entry.get('special') != 'along_path'
+                                and var_entry.get('cfg_fn') is not None)
+                if not args.skip_plan:
+                    if not is_variation:
+                        log(Fore.BLUE + "> Skip planner (non-variation entry).")
+                    else:
+                        if not os.path.exists(outdir_i):
+                            os.makedirs(outdir_i)
+                        cfg_i = os.path.join(outdir_i, var_nm_i + ".yaml")
+                        params_i = base_params.copy()
+                        params_i.update(var_opts_i)
+                        params_i['save_traj_abs_dir'] = outdir_i
+                        params_i['save_abs_dir'] = outdir_i
+                        with open(cfg_i, 'w') as f:
+                            yaml.dump(params_i, f, default_flow_style=False)
+                        log("- cfg: {}".format(cfg_i))
 
-                #     reset_planner_cmd = "rosservice call /{}/reset_planner".format(var_opts_i['node'])
-                #     print(Fore.BLUE + reset_planner_cmd)
-                #     subprocess.call(shlex.split(reset_planner_cmd))
-                # else:
-                #     print(Fore.BLUE + "> Skip planner")
+                        node = var_opts_i['node']
+                        set_planner_tokens = [
+                            'rosservice', 'call',
+                            '/{}/set_planner_state'.format(node),
+                            "config: '{}'".format(cfg_i),
+                        ]
+                        log(Fore.BLUE + ' '.join(set_planner_tokens))
+                        set_ret = run_subprocess(set_planner_tokens)
+                        if set_ret != 0:
+                            log(Fore.RED + "set_planner_state failed for {} "
+                                "(exit {}).".format(node, set_ret))
+                            failed_cfgs.append(fail_label + '-set-planner-failed')
+                            continue
 
-               
-                
-#________________________________________________________________________________________________________________
+                        plan_tokens = ['rosservice', 'call',
+                                       '/{}/plan_vis_save'.format(node)]
+                        log(Fore.BLUE + ' '.join(plan_tokens))
+                        plan_ret = run_subprocess(plan_tokens)
+                        if plan_ret != 0:
+                            log(Fore.RED + "plan_vis_save failed for {} "
+                                "(exit {}).".format(node, plan_ret))
+                            failed_cfgs.append(fail_label + '-plan-failed')
+                            continue
+
+                        reset_tokens = ['rosservice', 'call',
+                                        '/{}/reset_planner'.format(node)]
+                        log(Fore.BLUE + ' '.join(reset_tokens))
+                        run_subprocess(reset_tokens)
+                else:
+                    log(Fore.BLUE + "> Skip planner.")
+
+                # If we are only planning, there is nothing more to do for this entry.
+                if args.skip_render and args.skip_reg and args.skip_eval:
+                    progress_bar(var_idx, base_total, "{}:{} done".format(exp_nm, var_nm_i))
+                    if var_idx == base_total:
+                        progress_done()
+                    continue
 
                 path_suffix = '_path_yaw' if entry_path_yaw else ''
                 progress_bar(var_idx, base_total, "{}:{} render".format(exp_nm, var_nm_i))
