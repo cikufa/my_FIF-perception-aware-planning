@@ -124,7 +124,7 @@ fi
 
 run_variants() {
   local defaults_file="$1"
-  local cmd=(python3 "$planner" "$config" --defaults_yaml "$defaults_file" --skip_optimized)
+  local cmd=(python3 "$planner" "$config" --defaults_yaml "$defaults_file" --mode reg --skip_optimized)
   if [[ "${with_along_path}" == "true" ]]; then
     cmd+=(--along_path)
   fi
@@ -135,7 +135,7 @@ run_variants() {
 
 run_optimized() {
   local defaults_file="$1"
-  local cmd=(python3 "$planner" "$config" --defaults_yaml "$defaults_file" --only_optimized)
+  local cmd=(python3 "$planner" "$config" --defaults_yaml "$defaults_file" --mode reg --only_optimized)
   cmd+=(--along_path)
   cmd+=("${default_max_reg[@]}")
   cmd+=("${extra_args[@]}")
