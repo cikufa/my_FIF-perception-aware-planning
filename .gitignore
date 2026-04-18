@@ -105,3 +105,6 @@ __pycache__/
 .Python
 pyvenv.cfg
 pip-log.tx
+
+# matplotlib runtime config cache
+.mpl_config/

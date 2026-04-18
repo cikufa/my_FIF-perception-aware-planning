@@ -208,6 +208,103 @@ Recommended order: **`--variants`** uses **`traj_opt`**; **`optimize_trajopt.sh`
 
 Full single-tree pipeline (`traj_opt` only): add **`--full`** to **`optimize_trajopt.sh`** and **`register_trajopt.sh`** (see `run_planner_defaults_fov_full.yaml`). Env overrides: **`FOV_TRAJOPT_REG_DEFAULTS_VARIANTS`**, **`FOV_TRAJOPT_REG_DEFAULTS_OPTIMIZED`**, **`FOV_TRAJOPT_REG_DEFAULTS`** (with `--full`).
 
+## Command Cookbook (copy/paste)
+
+Use this section as a quick reminder of what to run and why.
+
+### RRT pipeline
+
+1) **Run FoV optimization on `_none` trajectories** (writes `optimized_path_yaw/`):
+
+```bash
+./optimize.sh --along-path --dataset r2_a20
+```
+
+- What it does: runs `manifold_test_trajectory` on each `<view>_none`, optimizing rotations only, and saves `optimization_time_sec.txt` + optimized quivers in `<view>_none/optimized_path_yaw/`.
+
+2) **Register and evaluate localization** (variants + optimized):
+
+```bash
+./register.sh --all --dataset r2_a20
+```
+
+- What it does: uses `run_planner_exp.py` to render UE images, run COLMAP registration, and compute `pose_errors.txt` for all variants and `optimized_path_yaw`.
+
+3) **Analyze and compare methods**:
+
+```bash
+./analyze.sh --dataset r2_a20
+```
+
+- What it does: runs `analyze_all.py` -> `analyze_pose_errors.py --multiple`, producing `analysis_outputs/{finite,original,penalized}` with plots/tables.
+
+4) **Custom trace root example**:
+
+```bash
+./register.sh --all --top_outdir /path/to/trace_r2_a20 --defaults-yaml /path/to/run_planner_defaults.yaml
+./analyze.sh --top-dir /path/to/trace_r2_a20
+```
+
+- Use when your experiment lives outside default `act_map_exp/trace_r2_a20`.
+
+---
+
+### Trajectory optimization pipeline (split trees: `traj_opt` + `traj_opt_xyz`)
+
+Your intended flow is:
+- `traj_opt`: all planned variants (`none`, `gp_*`, `quad_*`, `pc_*`)
+- `traj_opt_xyz`: FoV optimization input/output for `*_none` only (`optimized_path_yaw`)
+
+1) **Register/evaluate planned variants in `traj_opt`**:
+
+```bash
+./register_trajopt.sh --variants
+```
+
+- What it does: renders/registers/evaluates all planned traj-opt variants from `traj_opt`.
+
+2) **Run FoV optimization on xyz-none trajectories**:
+
+```bash
+./optimize_trajopt.sh --along-path
+```
+
+- What it does: writes FoV-optimized results under `traj_opt_xyz/<view>/<view>_none/optimized_path_yaw/`.
+
+3) **Register/evaluate optimized FoV outputs from `traj_opt_xyz`**:
+
+```bash
+./register_trajopt.sh --optimized
+```
+
+- What it does: localizes only `optimized_path_yaw` outputs listed in `run_planner_defaults_reg_optimized_xyz.yaml`.
+
+4) **Analyze merged comparison** (variants from `traj_opt` + optimized from `traj_opt_xyz`):
+
+```bash
+./analyze_trajopt.sh
+```
+
+- What it does: analyzes `traj_opt` and injects optimized TE/RE from `traj_opt_xyz` via `--merge-optimized-from`.
+
+5) **Analyze xyz tree only** (debug/check):
+
+```bash
+./analyze_trajopt.sh --xyz
+```
+
+- What it does: no merge, only `traj_opt_xyz` tree.
+
+6) **Single-tree full mode** (`traj_opt` only):
+
+```bash
+./optimize_trajopt.sh --full --along-path
+./register_trajopt.sh --full --all
+./analyze_trajopt.sh --full
+```
+
+- What it does: keeps variants + optimized in one tree (`traj_opt`), disables split-tree merge logic.
+
 ### End-to-end pipeline (traj opt + FoV + UE + TE/RE)
 
 1. **Planning (outside these scripts)** saves stamped poses under e.g. `.../warehouse_top/warehouse_top_none/` (`stamped_Twc.txt`, UE convention files, etc.).

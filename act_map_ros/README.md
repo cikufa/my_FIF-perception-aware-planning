@@ -44,8 +44,17 @@ And the final visualization will be something like
 
 Under the `src` folder, there are several specializations of the server class using different voxel types (i.e., the  `*_server_node.cpp` files).
 
+## `act_map_server_inl.h` (inline helpers)
+
+The inline implementations for `ActMapServer` live in:
+`act_map_ros/include/act_map_ros/act_map_server_inl.h`.
+
+Quick view command:
+```sh
+sed -n '1,200p' act_map_ros/include/act_map_ros/act_map_server_inl.h
+```
+
 ## Incremental Update
 
 > TODO: add an example and test data
-
 

@@ -4,7 +4,8 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 planner="${root_dir}/act_map_exp/scripts/run_planner_exp.py"
-# Planner bases for traj_opt experiments (full planned trajs under traj_opt/).
+# Planner experiment list (maps × variations). Default is quad_traj_opt warehouse_all.yaml — not quad_rrt.
+# Override: FOV_TRAJOPT_REG_CFG
 cfg_std="${root_dir}/act_map_exp/params/quad_traj_opt/warehouse/warehouse_all.yaml"
 
 def_variants="${root_dir}/act_map_exp/params/quad_traj_opt/warehouse/run_planner_defaults_reg_variants.yaml"
@@ -36,7 +37,8 @@ Usage: $(basename "$0") [--full] [--variants|--optimized|--all] [--no-along-path
   --full: variants and optimized both use traj_opt + run_planner_defaults_fov_full.yaml
           (full-pose traj-opt tree; FoV optimized folders live under traj_opt).
 
-Override planner yaml: FOV_TRAJOPT_REG_CFG (default: warehouse_all.yaml).
+Default planner yaml: <repo>/act_map_exp/params/quad_traj_opt/warehouse/warehouse_all.yaml
+  Override: FOV_TRAJOPT_REG_CFG
 Override defaults: FOV_TRAJOPT_REG_DEFAULTS_VARIANTS, FOV_TRAJOPT_REG_DEFAULTS_OPTIMIZED,
   or FOV_TRAJOPT_REG_DEFAULTS with --full. Or --defaults-yaml (applies to every run in this invocation).
 USAGE
@@ -91,6 +93,11 @@ fi
 
 if [[ -z "$mode" ]]; then
   mode="variants"
+fi
+
+if [[ ! -f "$config" ]]; then
+  echo "Planner config not found: ${config}" >&2
+  exit 1
 fi
 
 default_max_reg=()
