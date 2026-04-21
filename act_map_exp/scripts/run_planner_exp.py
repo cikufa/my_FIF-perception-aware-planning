@@ -49,7 +49,11 @@ def run_subprocess(cmd_tokens):
 
 
 def _ensure_along_path_output(input_dir, output_dir, gen_path_yaw_sc, allow_generate=True):
-    if os.path.exists(os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt')):
+    ue_candidates = [
+        os.path.join(output_dir, 'stamped_Twc_ue.txt'),
+        os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt'),
+    ]
+    if any(os.path.exists(p) for p in ue_candidates):
         return True
     if not allow_generate:
         return False
@@ -68,7 +72,7 @@ def _ensure_along_path_output(input_dir, output_dir, gen_path_yaw_sc, allow_gene
     if ret != 0:
         log(Fore.RED + "generate_path_yaw failed for {} (exit code {}).".format(output_dir, ret))
         return False
-    return os.path.exists(os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt'))
+    return any(os.path.exists(p) for p in ue_candidates)
 
 
 def _copy_if_exists(src, dst):
@@ -282,7 +286,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--exp_nm_rm_sufix', type=str, default='_base')
     parser.add_argument('--along_path', action='store_true',
-                        help='use stamped_Twc_ue_path_yaw and path_yaw output names')
+                        help='use along_path / optimized_path_yaw outputs')
     parser.add_argument('--no_generate_along_path', action='store_true',
                         help='do not generate along_path poses; require them to exist already')
     parser.add_argument('--verbose', action='store_true',
@@ -642,10 +646,19 @@ if __name__ == '__main__':
                 progress_bar(var_idx, base_total, "{}:{} render".format(exp_nm, var_nm_i))
                 render_dir_i = os.path.join(outdir_i, 'rendering')
                 if not args.skip_render:
-                    ue_pose_candidates = [
-                        os.path.join(input_dir_i, 'stamped_Twc_ue{}.txt'.format(path_suffix)),
-                        os.path.join(input_dir_i, 'optimized_stamped_Twc_ue{}.txt'.format(path_suffix)),
-                    ]
+                    ue_pose_candidates = []
+                    if path_suffix:
+                        ue_pose_candidates.extend([
+                            os.path.join(input_dir_i, 'stamped_Twc_ue.txt'),
+                            os.path.join(input_dir_i, 'stamped_Twc_ue_path_yaw.txt'),
+                            os.path.join(input_dir_i, 'optimized_stamped_Twc_ue.txt'),
+                            os.path.join(input_dir_i, 'optimized_stamped_Twc_ue_path_yaw.txt'),
+                        ])
+                    else:
+                        ue_pose_candidates.extend([
+                            os.path.join(input_dir_i, 'stamped_Twc_ue.txt'),
+                            os.path.join(input_dir_i, 'optimized_stamped_Twc_ue.txt'),
+                        ])
                     ue_pose_fn = None
                     for candidate in ue_pose_candidates:
                         if os.path.exists(candidate):

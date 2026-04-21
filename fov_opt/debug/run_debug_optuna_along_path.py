@@ -372,7 +372,7 @@ def aggregate_variant(run_dir: Path, views, src_name: str, dst_name: str,
         shutil.rmtree(dst_dir)
     dst_dir.mkdir(parents=True, exist_ok=True)
     _write_pose_errors(dst_dir / "pose_errors.txt", err_lines)
-    _write_twc(dst_dir / "stamped_Twc_path_yaw.txt", twc_lines)
+    _write_twc(dst_dir / "stamped_Twc.txt", twc_lines)
     return dst_dir
 
 
@@ -860,7 +860,7 @@ def main():
             views,
             "along_path",
             "along_path",
-            ["stamped_Twc_path_yaw.txt", "stamped_Twc.txt"],
+            ["stamped_Twc.txt", "stamped_Twc_path_yaw.txt"],
             ["pose_errors.txt", "pose_errors_path_yaw.txt"],
         )
         aggregate_variant(
@@ -868,7 +868,7 @@ def main():
             views,
             "optimized_path_yaw",
             "optimized_along_path",
-            ["optimized_stamped_Twc_path_yaw.txt", "stamped_Twc_path_yaw.txt", "stamped_Twc.txt"],
+            ["stamped_Twc.txt", "optimized_stamped_Twc_path_yaw.txt", "stamped_Twc_path_yaw.txt"],
             ["pose_errors.txt", "pose_errors_path_yaw.txt"],
         )
 

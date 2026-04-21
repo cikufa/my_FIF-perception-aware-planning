@@ -71,7 +71,7 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
   - Example: `./analyze.sh --plt-min-ratio 0.2 --plt-max-ratio 1.0`
 
 - **Trajectory optimization (separate entrypoints; RRT scripts above are unchanged)**  
-  - `optimize_trajopt.sh` -> forwards to `optimize.sh` with `--trace-root` / `--points3d` for `trace_trajopt_r1_a30/traj_opt_xyz` by default (FoV on xyz-only `*_none`; `--full` uses `traj_opt`).  
+  - `optimize_trajopt.sh` -> resolve traj-opt FoV inputs from `--map r2_a20|r1_a30`; defaults to `trace/traj_opt_<map>/traj_opt_xyz` (FoV on xyz-only `*_none`; `--full` uses `traj_opt`). It also auto-resolves `points3D.txt`, `FOV_OPT_ESDF_PATH`, and `FOV_MANIFOLD_BIN` unless already overridden in the environment.  
   - `register_trajopt.sh` -> `warehouse_all.yaml` + `run_planner_defaults_reg_variants.yaml` for **`--variants`** (`top_outdir` = `traj_opt`), and `run_planner_defaults_reg_optimized_xyz.yaml` for **`--optimized`** (`optimized_path_yaw` under `traj_opt_xyz`). **`--full`** uses `run_planner_defaults_fov_full.yaml` for both (everything under `traj_opt`).  
   - `analyze_trajopt.sh` -> default `traj_opt` + `warehouse_all.yaml`, and **`--merge-optimized-from traj_opt_xyz`** so **`optimized_path_yaw`** appears in plots (FoV registration lives under xyz). **`--xyz`** analyzes xyz only (no merge). **`--no-merge`** / **`register_trajopt.sh --full`**-style single tree: use `--full` or `--no-merge`. Uses `quad_traj_opt/base_analysis_cfg.yaml` when present.
 
@@ -196,7 +196,7 @@ Recommended order: **`--variants`** uses **`traj_opt`**; **`optimize_trajopt.sh`
 
 `./register_trajopt.sh --variants`
 
-`./optimize_trajopt.sh --along-path`
+`./optimize_trajopt.sh --map r2_a20`
 
 `./register_trajopt.sh --optimized`
 
@@ -266,7 +266,7 @@ Your intended flow is:
 2) **Run FoV optimization on xyz-none trajectories**:
 
 ```bash
-./optimize_trajopt.sh --along-path
+./optimize_trajopt.sh --map r2_a20
 ```
 
 - What it does: writes FoV-optimized results under `traj_opt_xyz/<view>/<view>_none/optimized_path_yaw/`.
@@ -298,7 +298,7 @@ Your intended flow is:
 6) **Single-tree full mode** (`traj_opt` only):
 
 ```bash
-./optimize_trajopt.sh --full --along-path
+./optimize_trajopt.sh --map r2_a20 --full
 ./register_trajopt.sh --full --all
 ./analyze_trajopt.sh --full
 ```

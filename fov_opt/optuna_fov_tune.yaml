@@ -36,7 +36,7 @@ vis_weight: 0.0            # visibility improvement weight (positive => maximize
 vis_metric: "vis30_count"  # vis30_count or vis30_score from quiver metrics
 vis_improvement: "delta"   # delta or ratio (last-first or (last-first)/first)
 vis_trace_root: ""         # optional override for quiver metrics search root(s)
-vis_pattern: "quivers_path_yaw_metrics.txt"
+vis_pattern: "per_iteration_quivers.txt"
 trial_dir_root: ""
 log_jacobian: 0
 render_width_tune: 480

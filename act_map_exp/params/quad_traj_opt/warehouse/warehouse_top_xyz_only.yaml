@@ -31,4 +31,4 @@ ceres_cost:
   - PosDynamic: 0.01
   - ESDF: 2e4
 
-save_traj_abs_dir: /home/shekoufeh/FIF_ws/src/rpg_information_field/act_map_exp/trace/quad_traj_opt/warehouse_xyz_only/warehouse_top
+save_traj_abs_dir: /home/shekoufeh/fov/FIF_ws/src/rpg_information_field/act_map_exp/trace/quad_traj_opt/warehouse_xyz_only/warehouse_top

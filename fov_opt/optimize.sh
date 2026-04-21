@@ -372,11 +372,11 @@ summarize_quivers() {
     echo "Trace root not found for summarizer: ${trace_root}" >&2
     return 1
   fi
-  if ! find "${trace_root}" -type f -name 'quivers*.txt' -print -quit | grep -q .; then
+  if ! find "${trace_root}" -type f \( -name 'per_iteration_quivers.txt' -o -name 'quivers*.txt' \) -print -quit | grep -q .; then
     echo "No quiver files found under ${trace_root}; skipping summarize." >&2
     return 0
   fi
-  local base_args=(--root "${trace_root}" --points "${points3d}" --pattern "quivers_path_yaw.txt")
+  local base_args=(--root "${trace_root}" --points "${points3d}" --pattern "per_iteration_quivers.txt")
   if [[ "${summarize_no_plots}" == "true" ]]; then
     base_args+=(--no-plots)
   fi
@@ -386,7 +386,7 @@ summarize_quivers() {
   fi
   if [[ ${#views[@]} -gt 0 ]]; then
     for v in "${views[@]}"; do
-      if ! find "${trace_root}/${v}" -type f -name 'quivers*.txt' -print -quit | grep -q .; then
+      if ! find "${trace_root}/${v}" -type f \( -name 'per_iteration_quivers.txt' -o -name 'quivers*.txt' \) -print -quit | grep -q .; then
         echo "No quiver files found for variation ${v} under ${trace_root}; skipping." >&2
         continue
       fi

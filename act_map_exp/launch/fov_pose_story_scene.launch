@@ -1,0 +1,71 @@
+<launch>
+  <arg name="quivers" default="" />
+  <arg name="points" default="$(find act_map_exp)/exp_data/warehouse_base_model_r2_a20/sparse/0/points3D.txt" />
+  <arg name="points_cols" default="1,2,3" />
+  <arg name="frame" default="world" />
+  <arg name="topic" default="fov_pose_story/markers" />
+  <arg name="pose_index" default="7" />
+  <arg name="fov_deg" default="60.0" />
+  <arg name="point_stride" default="1" />
+  <arg name="max_points" default="8000" />
+  <arg name="feature_scale" default="0.015" />
+  <arg name="show_path_arrows" default="true" />
+
+  <arg name="launch_voxblox" default="true" />
+  <arg name="voxblox_map_file" default="$(find act_map_exp)/exp_data/warehouse_voxblox/tsdf_esdf_max10.vxblx" />
+  <arg name="run_setup" default="true" />
+  <arg name="setup_wait_sec" default="2.0" />
+  <arg name="setup_service_wait_timeout" default="30.0" />
+
+  <arg name="launch_rviz" default="true" />
+  <arg name="rviz_cfg" default="$(find act_map_exp)/rviz_cfgs/fov_pose_story_viz.rviz" />
+
+  <include if="$(arg launch_voxblox)" file="$(find act_map_ros)/launch/voxblox_warehouse.launch" />
+
+  <node if="$(arg show_path_arrows)"
+        pkg="act_map_exp"
+        type="visualize_fov_pose_story.py"
+        name="fov_pose_story_viz"
+        output="screen"
+        args="--quivers $(arg quivers)
+              --points $(arg points)
+              --points-cols $(arg points_cols)
+              --frame $(arg frame)
+              --topic $(arg topic)
+              --pose-index $(arg pose_index)
+              --fov-deg $(arg fov_deg)
+              --point-stride $(arg point_stride)
+              --max-points $(arg max_points)
+              --feature-scale $(arg feature_scale)
+              --show-path-arrows" />
+
+  <node unless="$(arg show_path_arrows)"
+        pkg="act_map_exp"
+        type="visualize_fov_pose_story.py"
+        name="fov_pose_story_viz"
+        output="screen"
+        args="--quivers $(arg quivers)
+              --points $(arg points)
+              --points-cols $(arg points_cols)
+              --frame $(arg frame)
+              --topic $(arg topic)
+              --pose-index $(arg pose_index)
+              --fov-deg $(arg fov_deg)
+              --point-stride $(arg point_stride)
+              --max-points $(arg max_points)
+              --feature-scale $(arg feature_scale)" />
+
+  <node if="$(arg run_setup)" pkg="act_map_exp" type="rrt_info_viz_setup.py"
+        name="fov_pose_story_scene_setup" output="screen">
+    <param name="wait_sec" value="$(arg setup_wait_sec)" />
+    <param name="service_wait_timeout" value="$(arg setup_service_wait_timeout)" />
+    <param name="voxblox_load_map" value="true" />
+    <param name="voxblox_map_file" value="$(arg voxblox_map_file)" />
+    <param name="publish_esdf" value="true" />
+    <param name="generate_mesh" value="true" />
+    <param name="load_rrt_maps" value="false" />
+  </node>
+
+  <node if="$(arg launch_rviz)" pkg="rviz" type="rviz" name="fov_pose_story_scene_rviz"
+        args="-d $(arg rviz_cfg)" output="screen" />
+</launch>

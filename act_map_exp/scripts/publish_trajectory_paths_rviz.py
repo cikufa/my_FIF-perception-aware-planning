@@ -6,8 +6,8 @@ Reads stamped SE(3) files (same format as analyze_pose_errors: time + row-major 
 Translation is taken from the last column of the upper 3x4 block (camera/world positions).
 
 Typical layout:
-  <root>/<traj>/<traj>_none/stamped_Twc_path_yaw.txt          (baseline)
-  <root>/<traj>/<traj>_none/optimized_path_yaw/stamped_Twc_path_yaw.txt  (ours)
+  <root>/<traj>/<traj>_none/stamped_Twc.txt          (baseline)
+  <root>/<traj>/<traj>_none/optimized_path_yaw/stamped_Twc.txt  (ours)
 
 Example (after sourcing your ROS workspace):
   python3 publish_trajectory_paths_rviz.py \\
@@ -40,14 +40,14 @@ def load_xyz_from_stamped(path: Path) -> np.ndarray:
 
 def default_paths(root: Path, traj: str) -> tuple[Path, Path]:
     base = root / traj / f"{traj}_none"
-    baseline = base / "stamped_Twc_path_yaw.txt"
+    baseline = base / "stamped_Twc.txt"
     if not baseline.exists():
-        alt = base / "stamped_Twc.txt"
+        alt = base / "stamped_Twc_path_yaw.txt"
         if alt.exists():
             baseline = alt
-    optimized = base / "optimized_path_yaw" / "stamped_Twc_path_yaw.txt"
+    optimized = base / "optimized_path_yaw" / "stamped_Twc.txt"
     if not optimized.exists():
-        alt2 = base / "optimized_path_yaw" / "stamped_Twc.txt"
+        alt2 = base / "optimized_path_yaw" / "stamped_Twc_path_yaw.txt"
         if alt2.exists():
             optimized = alt2
     return baseline, optimized

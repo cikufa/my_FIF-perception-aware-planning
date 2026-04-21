@@ -27,7 +27,7 @@ Usage: $(basename "$0") [--tune] [--along-path] [--dataset NAME] [extra optuna a
   --vis-weight W     Add visibility improvement term (minimization uses -W * vis_improvement).
   --vis-metric NAME  Visibility metric from quiver metrics (vis30_count or vis30_score).
   --vis-improvement MODE  delta or ratio (last-first or (last-first)/first).
-  --vis-pattern NAME  Quiver metrics filename pattern (default: quivers_path_yaw_metrics.txt).
+  --vis-pattern NAME  Quiver filename pattern (default: per_iteration_quivers.txt).
 USAGE
 }
 
@@ -326,11 +326,11 @@ if [[ "$workers" -le 1 ]]; then
   exec "${cmd[@]}"
 fi
 
-default_storage="sqlite:////home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/fov_opt/optuna/optuna_r2_a20.db"
+default_storage="sqlite:////home/shekoufeh/fov/FIF_ws/src/rpg_information_field/fov_opt/optuna/optuna_r2_a20.db"
 if [[ "${dataset}" == "r1_a30" ]]; then
-  default_storage="sqlite:////home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/fov_opt/optuna/optuna_r1_a30.db"
+  default_storage="sqlite:////home/shekoufeh/fov/FIF_ws/src/rpg_information_field/fov_opt/optuna/optuna_r1_a30.db"
 elif [[ "${dataset}" == "both" ]]; then
-  default_storage="sqlite:////home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/fov_opt/optuna/optuna_both.db"
+  default_storage="sqlite:////home/shekoufeh/fov/FIF_ws/src/rpg_information_field/fov_opt/optuna/optuna_both.db"
 fi
 storage="${storage_override:-$default_storage}"
 

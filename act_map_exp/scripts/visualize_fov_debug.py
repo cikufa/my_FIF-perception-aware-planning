@@ -63,6 +63,8 @@ def parse_quiver_blocks(path: Path, min_cols: int = 6) -> np.ndarray:
     with path.open("r", encoding="utf-8") as f:
         for raw in f:
             line = raw.strip()
+            if line.startswith("#"):
+                continue
             if not line:
                 if cur:
                     blocks.append(np.asarray(cur, dtype=float))
@@ -325,7 +327,8 @@ def parse_args() -> argparse.Namespace:
                         help="Pose sphere diameter as ratio of path diagonal.")
     parser.add_argument("--text-every", type=int, default=5,
                         help="Show count text every N poses (0 disables).")
-    return parser.parse_args()
+    args, _ = parser.parse_known_args()
+    return args
 
 
 def main() -> None:
@@ -382,7 +385,7 @@ def main() -> None:
 
     cos_fov = np.cos(np.deg2rad(args.fov_deg) * 0.5)
 
-    pub = rospy.Publisher(args.topic, MarkerArray, queue_size=1)
+    pub = rospy.Publisher(args.topic, MarkerArray, queue_size=1, latch=True)
     rospy.sleep(0.2)
     publish_delete_all(pub, args.frame, args.namespace)
     rospy.sleep(0.1)

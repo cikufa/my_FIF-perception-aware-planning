@@ -2,7 +2,7 @@
 """Summarize per-iteration quiver metrics (alignment + visibility) and save next to results.
 
 Input: quiver file with blocks separated by blank lines.
-Each line: x,y,z,dx,dy,dz (extra columns are ignored).
+Each line: x,y,z,dx,dy,dz or x,y,z,dx,dy,dz,visible_count,visibility_score.
 Outputs (next to quiver file):
   - <prefix>_pose_metrics_progress.csv
   - <prefix>_pose_metrics_per_iter_summary.csv
@@ -22,15 +22,15 @@ Alignment metrics:
   - normalized alignment = (mean(u) + 1) / 2 in [0, 1]
 
 Visibility metrics:
-  1) Schedule-based (per iteration alpha):
-     - vis_sched_count = count(u >= cos(alpha_i))
-     - vis_sched_score = sum(sigmoid(ks_i * (u - cos(alpha_i))))
+  1) Config-based (constant alpha = final stage of fov_schedule):
+     - vis_sched_count = count(u >= cos(alpha_final))
+     - vis_sched_score = sum(sigmoid(ks_final * (u - cos(alpha_final))))
   2) Fixed 30-deg FOV (half-alpha = 15 deg):
      - vis30_count = count(u >= cos(15))
      - vis30_score = sum(sigmoid(ks * (u - cos(15))))
 
-Schedule alpha is resolved from --fov-schedule or FOV_OPT_FOV_SCHEDULE,
-otherwise falls back to the optimizer's default schedule (180/90/60/vis_angle).
+The config alpha is resolved from the last value in --fov-schedule or
+FOV_OPT_FOV_SCHEDULE, otherwise it falls back to --vis-angle.
 """
 
 import argparse
@@ -75,25 +75,9 @@ def parse_schedule(text: str) -> List[float]:
 def build_alpha_schedule(n_iter: int,
                          schedule_deg: List[float],
                          vis_angle_deg: float) -> np.ndarray:
-    alpha = np.zeros((n_iter,), dtype=float)
     if schedule_deg:
-        stages = len(schedule_deg)
-        stage_len = max(1, n_iter // stages)
-        for i in range(n_iter):
-            stage_idx = min(i // stage_len, stages - 1)
-            alpha[i] = float(schedule_deg[stage_idx])
-        return alpha
-    for i in range(n_iter):
-        ratio = float(i) / max(1, n_iter)
-        if ratio < 0.05:
-            alpha[i] = 179.0
-        elif ratio < 0.10:
-            alpha[i] = 90.0
-        elif ratio < 0.15:
-            alpha[i] = 60.0
-        else:
-            alpha[i] = float(vis_angle_deg)
-    return alpha
+        return np.full((n_iter,), float(schedule_deg[-1]), dtype=float)
+    return np.full((n_iter,), float(vis_angle_deg), dtype=float)
 
 
 def build_ks_schedule(alpha_deg: np.ndarray,
@@ -159,6 +143,8 @@ def append_suffix_before_extension(path: Path, suffix: str) -> Path:
 
 
 def resolve_metrics_path(quiver_path: Path) -> Optional[Path]:
+    if quiver_path.name == "per_iteration_quivers.txt":
+        return quiver_path if quiver_path.exists() else None
     if quiver_path.name.endswith("_metrics.txt"):
         return quiver_path if quiver_path.exists() else None
     cand = append_suffix_before_extension(quiver_path, "_metrics")
@@ -746,7 +732,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metrics", nargs="*", default=[], help="Explicit quiver files.")
     parser.add_argument("--variation", default="",
                         help="Filter to a specific variation name (e.g., diagonal).")
-    parser.add_argument("--pattern", default="quivers*.txt",
+    parser.add_argument("--pattern", default="per_iteration_quivers.txt",
                         help="Glob pattern for quiver files under root.")
     parser.add_argument("--include-metrics", action="store_true",
                         help="Include *_metrics.txt files when scanning.")

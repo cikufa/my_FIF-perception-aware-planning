@@ -125,20 +125,24 @@ def _poseErrorHasData(err_fn):
             return True
     return False
 
+
+def _find_twc_file(subdir, *names):
+    for name in names:
+        if not name:
+            continue
+        path = os.path.join(subdir, name)
+        if os.path.exists(path):
+            return path
+    return os.path.join(subdir, names[0]) if names else ""
+
 def _select_pose_error_file(subdir, default_err_name, default_twc_name):
     # Prefer path-yaw files when present in a folder.
     path_err = os.path.join(subdir, pose_e_path_yaw_nm)
     if os.path.exists(path_err):
-        twc_path = os.path.join(subdir, Twc_path_yaw_nm)
-        if not os.path.exists(twc_path):
-            twc_path = os.path.join(subdir, default_twc_name)
+        twc_path = _find_twc_file(subdir, Twc_nm, Twc_path_yaw_nm, default_twc_name)
         return path_err, twc_path
     err_path = os.path.join(subdir, default_err_name)
-    twc_path = os.path.join(subdir, default_twc_name)
-    if not os.path.exists(twc_path):
-        twc_path_yaw = os.path.join(subdir, Twc_path_yaw_nm)
-        if os.path.exists(twc_path_yaw):
-            twc_path = twc_path_yaw
+    twc_path = _find_twc_file(subdir, default_twc_name, Twc_nm, Twc_path_yaw_nm)
     return err_path, twc_path
 
 
@@ -924,7 +928,7 @@ def _hasPathYawResults(top_dir):
             pose_err = os.path.join(root, pose_e_nm)
         if pose_err is None:
             continue
-        twc_path = os.path.join(root, 'stamped_Twc_path_yaw.txt')
+        twc_path = _find_twc_file(root, 'stamped_Twc.txt', 'stamped_Twc_path_yaw.txt')
         if os.path.exists(twc_path) and _poseErrorHasData(pose_err):
             return True
     return False

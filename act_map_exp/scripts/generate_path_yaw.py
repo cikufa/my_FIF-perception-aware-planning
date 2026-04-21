@@ -146,15 +146,15 @@ def save_ue(path, samples):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate stamped_Twc_path_yaw.txt and stamped_Twc_ue_path_yaw.txt from stamped_Twc.txt")
+        description="Generate along-path stamped_Twc.txt and stamped_Twc_ue.txt from stamped_Twc.txt")
     parser.add_argument('--input_dir', required=True,
                         help='Directory containing stamped_Twc.txt')
     parser.add_argument('--output_dir', default=None,
-                        help='Output directory (defaults to input_dir)')
+                        help='Output directory (defaults to <input_dir>/along_path)')
     args = parser.parse_args()
 
     input_dir = args.input_dir
-    output_dir = args.output_dir or input_dir
+    output_dir = args.output_dir or os.path.join(input_dir, 'along_path')
     twc_in = os.path.join(input_dir, 'stamped_Twc.txt')
     if not os.path.exists(twc_in):
         raise FileNotFoundError("Missing stamped_Twc.txt: {}".format(twc_in))
@@ -162,8 +162,17 @@ def main():
 
     samples = load_twc(twc_in)
     path_samples = build_path_yaw(samples)
-    twc_out = os.path.join(output_dir, 'stamped_Twc_path_yaw.txt')
-    ue_out = os.path.join(output_dir, 'stamped_Twc_ue_path_yaw.txt')
+    twc_out = os.path.join(output_dir, 'stamped_Twc.txt')
+    ue_out = os.path.join(output_dir, 'stamped_Twc_ue.txt')
+    if os.path.abspath(twc_out) == os.path.abspath(twc_in):
+        raise RuntimeError(
+            "Refusing to overwrite input stamped_Twc.txt. "
+            "Pass --output_dir or use the default along_path output directory."
+        )
+    for legacy_name in ('stamped_Twc_path_yaw.txt', 'stamped_Twc_ue_path_yaw.txt'):
+        legacy_path = os.path.join(output_dir, legacy_name)
+        if os.path.exists(legacy_path):
+            os.remove(legacy_path)
     save_twc(twc_out, path_samples)
     save_ue(ue_out, path_samples)
 

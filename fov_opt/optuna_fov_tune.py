@@ -476,7 +476,7 @@ def make_env(params, base_env, args=None):
     if warm_start_file := env.get("_FOV_OPT_WARM_START_FILE"):
         env["FOV_OPT_WARM_START_FILE"] = warm_start_file
     if args is not None and getattr(args, "vis_weight", 0.0):
-        # Keep per-iteration quiver metrics so visibility improvement can be computed.
+        # Visibility metrics are embedded in per_iteration_quivers.txt.
         env["FOV_OPT_KEEP_METRICS"] = "1"
     return env
 
@@ -1257,7 +1257,7 @@ def main():
     if not hasattr(args, "vis_improvement") or args.vis_improvement is None:
         args.vis_improvement = "delta"
     if not hasattr(args, "vis_pattern") or args.vis_pattern is None:
-        args.vis_pattern = "quivers_path_yaw_metrics.txt"
+        args.vis_pattern = "per_iteration_quivers.txt"
     if not hasattr(args, "pose_error_mode") or args.pose_error_mode is None:
         args.pose_error_mode = "finite"
     if not hasattr(args, "base_analysis_cfg") or args.base_analysis_cfg is None:

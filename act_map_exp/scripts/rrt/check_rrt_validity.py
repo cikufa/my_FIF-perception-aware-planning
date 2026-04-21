@@ -10,7 +10,13 @@ def _repo_root():
     this_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.abspath(os.path.join(this_dir, "..", "..", ".."))
 
+
+def _workspace_root(repo_root):
+    return os.path.abspath(os.path.join(repo_root, "..", "..", ".."))
+
+
 def _find_catkin_bin(repo_root):
+    workspace_root = _workspace_root(repo_root)
     candidates = []
     # 1) explicit env
     devel = os.environ.get("CATKIN_DEVEL_PREFIX")
@@ -28,7 +34,8 @@ def _find_catkin_bin(repo_root):
             break
         cur = parent
     # 4) common workspace location
-    candidates.append("/home/shekoufeh/FIF_ws/devel/lib/act_map_exp/check_rrt_validity_node")
+    candidates.append(os.path.join(workspace_root, "FIF_ws", "devel", "lib", "act_map_exp",
+                                   "check_rrt_validity_node"))
     for c in candidates:
         if os.path.exists(c):
             return c
@@ -36,6 +43,8 @@ def _find_catkin_bin(repo_root):
 
 
 def _compile(src, out_bin, repo_root):
+    workspace_root = _workspace_root(repo_root)
+    workspace_ws = os.path.join(workspace_root, "FIF_ws")
     includes = [
         repo_root,
         os.path.join(repo_root, "act_map", "include"),
@@ -48,11 +57,11 @@ def _compile(src, out_bin, repo_root):
         "/usr/include/eigen3",
     ]
     # common workspace location for minkindr
-    minkindr_ws = "/home/shekoufeh/FIF_ws/src/minkindr/minkindr/include"
+    minkindr_ws = os.path.join(workspace_ws, "src", "minkindr", "minkindr", "include")
     if os.path.isdir(minkindr_ws):
         includes.append(minkindr_ws)
     # generated protobuf headers in catkin build space
-    build_act_map = "/home/shekoufeh/FIF_ws/build/act_map"
+    build_act_map = os.path.join(workspace_ws, "build", "act_map")
     if os.path.isdir(build_act_map):
         includes.append(build_act_map)
     cmd = [
@@ -64,9 +73,9 @@ def _compile(src, out_bin, repo_root):
         cmd.append("-I{}".format(inc))
     lib_dirs = [
         os.path.join(repo_root, "devel", "lib"),
-        "/home/shekoufeh/FIF_ws/devel/lib",
-        "/home/shekoufeh/FIF_ws/build/act_map",
-        "/home/shekoufeh/FIF_ws/build/act_map_exp",
+        os.path.join(workspace_ws, "devel", "lib"),
+        os.path.join(workspace_ws, "build", "act_map"),
+        os.path.join(workspace_ws, "build", "act_map_exp"),
     ]
     for ld in lib_dirs:
         if os.path.isdir(ld):
