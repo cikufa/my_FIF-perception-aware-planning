@@ -4,6 +4,7 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="${root_dir}/act_map_exp/scripts/run_fov_opt_rrt_none.sh"
 config="${FOV_TUNE_CONFIG:-${root_dir}/fov_opt/optuna_fov_tune.yaml}"
+default_best_params="${root_dir}/fov_opt/optuna/optuna_best_params.yaml"
 default_esdf="${root_dir}/act_map_exp/exp_data/warehouse_voxblox/tsdf_esdf_max10.vxblx"
 export FOV_TUNE_CONFIG="${config}"
 
@@ -32,6 +33,7 @@ Usage: $(basename "$0") [--along-path] [--dataset NAME] [--trace-root PATH] [vie
 
 Reads best params from optuna results (best_params_yaml in optuna_fov_tune.yaml).
 If missing, falls back to initial_params/fixed_params in optuna_fov_tune.yaml.
+Default best-params file path: ${root_dir}/fov_opt/optuna/optuna_best_params.yaml
 USAGE
 }
 
@@ -45,7 +47,7 @@ occlusion_mode="env"
 compare_ray_occlusion=false
 esdf_override=""
 config_override=""
-best_params_override=""
+best_params_override="${default_best_params}"
 dataset_mode="single"
 summarize=false
 summarize_variation=""

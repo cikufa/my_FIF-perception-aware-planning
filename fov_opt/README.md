@@ -18,13 +18,13 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
     - `--summarize-no-plots` skips PNGs.
   - Default views: all subdirs under `act_map_exp/trace_r2_a20` that contain
     `<view>_none` (override with explicit view names or `FOV_TRACE_ROOT`).
-  - It optimizes the path-yaw variant only and writes outputs under
-    `<view>_none/optimized_path_yaw`. It does **not** generate the along_path
-    baseline folder.
+  - It optimizes the FoV orientation only and writes outputs under
+    `<view>_none/<output-dir-name>`. The default output directory name is
+    `optimized`; use `--output-dir-name` to change it.
   - Each optimization run writes `optimization_time_sec.txt` inside its output
-    folder (e.g., `<view>_none/optimized_path_yaw/optimization_time_sec.txt`).
+    folder (e.g., `<view>_none/optimized_w_occ/optimization_time_sec.txt`).
   - `--summarize` emits additional per-pose CSVs under
-    `<view>_none/optimized_path_yaw/quiver_analysis`, including
+    `<view>_none/<output-dir-name>/quiver_analysis`, including
     `*_pose_metrics_progress_full.csv` when debug logs are available.
   - After `analyze_pose_errors.py --multiple`, **`analysis_outputs/finite/`** includes **`pipeline_runtime*.tex`**, **`.txt`**, and **`.csv`** (and the same under **`fov_optimization_runtime*`**): **rows** = method variants (No Info., GP/Quad/PC, **Ours**); **columns** = mean traj-opt time (s) from `ceres_summary.yaml` as `custom_solve_time - custom_logger_time` (same as `analyze_traj_opt.py` / Table V–style Ceres timing), averaged over analyzed trajectories under `top_dir` for Fisher variants, and mean Ceres time for the xyz-only `*_none` run on **`--merge_optimized_from`** (or `top_dir` if unset) for **Ours**; second column is **FoV** manifold time (mean of `optimization_time_sec.txt` under `*_none/optimized_path_yaw/`) **for Ours only**, **0** for other rows.
 
@@ -91,6 +91,141 @@ pipeline logic. The heavy lifting stays in `act_map_exp/scripts`.
   - `--debug-log /path/to/optimization_debug.csv` forces a specific debug log.
   - If a matching `quivers*_metrics.txt` file exists (and shape matches),
     visibility count/score are read from it to match the optimizer’s own metrics.
+
+
+## Current Run Commands
+
+These are the current wrapper commands for the FoV optimization flows in this
+checkout.
+
+- Best params default:
+  `optimize.sh`, `optimize_rrt.sh`, and `optimize_trajopt.sh` now default to
+  `fov_opt/optuna/optuna_best_params.yaml`.
+- Ray occlusion:
+  `--with-ray-occlusion` enables ESDF ray-based filtering.
+  `--without-ray-occlusion` disables it.
+- Saved feature lists:
+  if `FOV_OPT_DUMP_VISIBLE_FEATURES=1`, each run writes
+  `visible_features_per_iteration.txt`, which `fov_pose_story_scene.launch`
+  reads directly.
+
+### RRT
+
+Run all RRT views for `r1_a30` with ray occlusion, writing to `optimized_w_occ`:
+
+```bash
+cd /home/shekoufeh/fov/FIF_ws/src/rpg_information_field
+export FOV_OPT_DUMP_VISIBLE_FEATURES=1
+./fov_opt/optimize_rrt.sh --map r1_a30 --with-ray-occlusion --output-dir-name optimized_w_occ
+```
+
+Run all RRT views for `r1_a30` without ray occlusion, writing to `optimized_wo_occ`:
+
+```bash
+cd /home/shekoufeh/fov/FIF_ws/src/rpg_information_field
+export FOV_OPT_DUMP_VISIBLE_FEATURES=1
+./fov_opt/optimize_rrt.sh --map r1_a30 --without-ray-occlusion --output-dir-name optimized_wo_occ
+```
+
+Run a single RRT view:
+
+```bash
+./fov_opt/optimize_rrt.sh --map r1_a30 --with-ray-occlusion --output-dir-name optimized_w_occ bottom
+./fov_opt/optimize_rrt.sh --map r1_a30 --without-ray-occlusion --output-dir-name optimized_wo_occ bottom
+```
+
+Compare-mode run in one command:
+
+```bash
+./fov_opt/optimize_rrt.sh --map r1_a30 --compare-ray-occlusion --output-dir-name optimized
+```
+
+This writes:
+- `optimized_with_ray_occlusion`
+- `optimized_without_ray_occlusion`
+
+### Trajectory Optimization
+
+Run all traj-opt xyz-only `*_none` views for `r2_a20` with ray occlusion:
+
+```bash
+cd /home/shekoufeh/fov/FIF_ws/src/rpg_information_field
+export FOV_OPT_DUMP_VISIBLE_FEATURES=1
+./fov_opt/optimize_trajopt.sh --map r2_a20 --with-ray-occlusion --output-dir-name optimized_w_occ
+```
+
+Run all traj-opt xyz-only `*_none` views for `r2_a20` without ray occlusion:
+
+```bash
+cd /home/shekoufeh/fov/FIF_ws/src/rpg_information_field
+export FOV_OPT_DUMP_VISIBLE_FEATURES=1
+./fov_opt/optimize_trajopt.sh --map r2_a20 --without-ray-occlusion --output-dir-name optimized_wo_occ
+```
+
+Run a single traj-opt view:
+
+```bash
+./fov_opt/optimize_trajopt.sh --map r2_a20 --with-ray-occlusion --output-dir-name optimized_w_occ warehouse_diagonal
+./fov_opt/optimize_trajopt.sh --map r2_a20 --without-ray-occlusion --output-dir-name optimized_wo_occ warehouse_diagonal
+```
+
+Compare-mode run in one command:
+
+```bash
+./fov_opt/optimize_trajopt.sh --map r2_a20 --compare-ray-occlusion --output-dir-name optimized
+```
+
+This writes:
+- `optimized_with_ray_occlusion`
+- `optimized_without_ray_occlusion`
+
+### Direct `optimize.sh`
+
+Use this when you want to point directly at a trace root.
+
+RRT `r1_a30` with ray occlusion:
+
+```bash
+./fov_opt/optimize.sh \
+  --trace-root /home/shekoufeh/fov/FIF_ws/src/rpg_information_field/act_map_exp/trace/trace_rrt_r1_a30 \
+  --points3d /home/shekoufeh/fov/FIF_ws/src/rpg_information_field/act_map_exp/exp_data/warehouse_base_model_r1_a30/sparse/0/points3D.txt \
+  --with-ray-occlusion \
+  --output-dir-name optimized_w_occ
+```
+
+RRT `r1_a30` without ray occlusion:
+
+```bash
+./fov_opt/optimize.sh \
+  --trace-root /home/shekoufeh/fov/FIF_ws/src/rpg_information_field/act_map_exp/trace/trace_rrt_r1_a30 \
+  --points3d /home/shekoufeh/fov/FIF_ws/src/rpg_information_field/act_map_exp/exp_data/warehouse_base_model_r1_a30/sparse/0/points3D.txt \
+  --without-ray-occlusion \
+  --output-dir-name optimized_wo_occ
+```
+
+### Visualize Saved Quivers and Saved Visible Features in RViz
+
+`fov_pose_story_scene.launch` now expects a quiver file with a matching saved
+feature sidecar next to it. For current FoV outputs, that means:
+- `per_iteration_quivers.txt`
+- `visible_features_per_iteration.txt`
+
+Example:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source /home/shekoufeh/fov/FIF_ws/devel/setup.bash
+
+roslaunch act_map_exp fov_pose_story_scene.launch \
+  quivers:=/home/shekoufeh/fov/FIF_ws/src/rpg_information_field/act_map_exp/trace/traj_opt_r2_a20/traj_opt_xyz/warehouse_diagonal/warehouse_diagonal_none/optimized_wo_occ/per_iteration_quivers.txt \
+  pose_index:=7
+```
+
+Notes:
+- `pose_index` is 0-based.
+- The launch no longer takes `fov_deg`; it only reads saved feature lists.
+- The visualizer overlays all iterations for the selected pose, colored from
+  red to green across optimization progress.
 
 
 ## Config

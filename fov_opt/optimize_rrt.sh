@@ -4,6 +4,7 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 default_manifold_bin="/home/shekoufeh/fov/My_FoV_Optimization/Manifold_cpp/build/manifold_test_trajectory"
+default_best_params="${root_dir}/fov_opt/optuna/optuna_best_params.yaml"
 default_esdf="/home/shekoufeh/fov/FIF_ws/src/rpg_information_field/act_map_exp/exp_data/warehouse_voxblox/tsdf_esdf_max10.vxblx"
 
 usage() {
@@ -26,13 +27,15 @@ Usage: $(basename "$0") [--map r2_a20|r1_a30] [optimize.sh args...]
 Auto-configures:
   - trace root
   - points3D.txt
+  - best params YAML
   - ESDF map
   - manifold binary
 
 Forwards all other arguments to optimize.sh (e.g. --summarize or explicit view names).
 
 Env: same as optimize.sh for tuning/summary options. This wrapper hardcodes
-     FOV_MANIFOLD_BIN and enables FOV_OPT_ESDF_PATH by default unless disabled.
+     FOV_MANIFOLD_BIN, defaults FOV_BEST_PARAMS_YAML to the local optuna best
+     params file, and enables FOV_OPT_ESDF_PATH by default unless disabled.
 USAGE
 }
 
@@ -103,6 +106,9 @@ if [[ ! -x "${default_manifold_bin}" ]]; then
   exit 1
 fi
 export FOV_MANIFOLD_BIN="${default_manifold_bin}"
+if [[ -z "${FOV_BEST_PARAMS_YAML:-}" && -f "${default_best_params}" ]]; then
+  export FOV_BEST_PARAMS_YAML="${default_best_params}"
+fi
 
 if [[ "${occlusion_mode}" == "with" ]]; then
   esdf_path="${esdf_override:-${FOV_OPT_ESDF_PATH:-${default_esdf}}}"
