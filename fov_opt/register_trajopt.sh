@@ -31,7 +31,7 @@ Usage: $(basename "$0") [--full] [--variants|--optimized|--all] [--no-along-path
   Default (no --full):
     --variants   top_outdir = trace_trajopt_r1_a30/traj_opt (all planned trajs / info variants).
                  traj_opt_xyz is NOT used here (that tree is only for FoV optimization inputs).
-    --optimized  Registers .../traj_opt_xyz/.../optimized_path_yaw (output of optimize_trajopt.sh).
+    --optimized  Registers .../traj_opt_xyz/.../optimized (output of optimize_trajopt.sh).
     --all        Runs variants then optimized (each with the correct defaults yaml).
 
   --full: variants and optimized both use traj_opt + run_planner_defaults_fov_full.yaml

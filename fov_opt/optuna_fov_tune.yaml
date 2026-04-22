@@ -13,9 +13,9 @@ pose_errors: ""
 pose_errors_files: []
 error_stat_files: []
 pose_errors_files_along_path:
-  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r2_a20/top/top_none/optimized_path_yaw/pose_errors.txt"
-  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r2_a20/diagonal/diagonal_none/optimized_path_yaw/pose_errors.txt"
-  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r2_a20/bottom/bottom_none/optimized_path_yaw/pose_errors.txt"
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r2_a20/top/top_none/optimized/pose_errors.txt"
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r2_a20/diagonal/diagonal_none/optimized/pose_errors.txt"
+  - "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/act_map_exp/trace_r2_a20/bottom/bottom_none/optimized/pose_errors.txt"
 pose_errors_files_normal: []
 error_stat_files_along_path: []
 error_stat_files_normal: []
@@ -50,7 +50,7 @@ quiet_subprocess: true
 optuna_log_level: "CRITICAL"
 results_jsonl: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/fov_opt/optuna/optuna_trials_r2_a20.jsonl"
 results_csv: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/fov_opt/optuna/optuna_trials_r2_a20.csv"
-best_params_yaml: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/fov_opt/optuna/optuna_best_params.yaml"
+best_params_yaml: "optuna/optuna_best_params.yaml"
 pareto_params_yaml: "/home/shekoufeh/fov_ws/my_FIF-perception-aware-planning/fov_opt/optuna/optuna_pareto_params.yaml"
 enqueue_initial: true
 # Optimization params (names align with trajectory_optimizer_copy.h).

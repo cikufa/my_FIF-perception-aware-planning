@@ -19,6 +19,7 @@ pose_e_nm = 'pose_errors.txt'
 Twc_nm = 'stamped_Twc.txt'
 Twc_path_yaw_nm = 'stamped_Twc_path_yaw.txt'
 pose_e_path_yaw_nm = 'pose_errors_path_yaw.txt'
+OPTIMIZED_DIR_NAMES = ('optimized', 'optimized_path_yaw')
 
 # Exclude only optimized from analysis outputs.
 EXCLUDE_OPTIMIZED = True
@@ -34,6 +35,10 @@ def _is_optimized_name(name):
     if name.endswith('_optimized') and not name.endswith('_optimized_path_yaw'):
         return True
     return False
+
+
+def _is_optimized_dirname(name):
+    return name in OPTIMIZED_DIR_NAMES
 
 
 def _filter_cfg_for_optimized(cfg):
@@ -614,10 +619,12 @@ def _mean_fov_opt_over_cfgs(fov_root, cfg_nms):
     """Mean FoV manifold time from optimization_time_sec.txt (ours only)."""
     vals = []
     for cfg in cfg_nms:
-        p = os.path.join(fov_root, cfg, cfg + '_none', 'optimized_path_yaw', 'optimization_time_sec.txt')
-        t = _read_fov_optimization_time_seconds(p)
-        if math.isfinite(t):
-            vals.append(t)
+        for opt_dir_nm in OPTIMIZED_DIR_NAMES:
+            p = os.path.join(fov_root, cfg, cfg + '_none', opt_dir_nm, 'optimization_time_sec.txt')
+            t = _read_fov_optimization_time_seconds(p)
+            if math.isfinite(t):
+                vals.append(t)
+                break
     return float(np.mean(vals)) if vals else float('nan')
 
 
@@ -903,7 +910,7 @@ def _ensureOptimizedPathYawStyle(cfg):
 def _collectSubdirs(cfg_dir):
     subdir_map = {}
     for name in sorted(os.listdir(cfg_dir)):
-        if name in ("optimized", "optimized_path_yaw"):
+        if _is_optimized_dirname(name):
             continue
         path = os.path.join(cfg_dir, name)
         if os.path.isdir(path):
@@ -919,7 +926,7 @@ def _collectSubdirs(cfg_dir):
 
 def _hasPathYawResults(top_dir):
     for root, _, files in os.walk(top_dir):
-        if os.path.basename(root) != 'optimized_path_yaw':
+        if not _is_optimized_dirname(os.path.basename(root)):
             continue
         pose_err = None
         if pose_e_path_yaw_nm in files:
@@ -940,7 +947,7 @@ def _accumulateOptimizedPathYaw(top_dir, acc_trans_e, acc_rot_e, base_cfg):
     max_trans = base_cfg.get('max_trans_e_m', base_cfg.get('hist_max_trans_e', float('nan')))
     max_rot = base_cfg.get('max_rot_e_deg', base_cfg.get('hist_max_rot_e', float('nan')))
     for root, _, files in os.walk(top_dir):
-        if os.path.basename(root) != 'optimized_path_yaw':
+        if not _is_optimized_dirname(os.path.basename(root)):
             continue
         err_fn = None
         if pose_e_path_yaw_nm in files:
@@ -963,7 +970,7 @@ def _collectOptimizedPathYawForCfg(cfg_dir, base_cfg):
     trans_all = []
     rot_all = []
     for root, _, files in os.walk(cfg_dir):
-        if os.path.basename(root) != 'optimized_path_yaw':
+        if not _is_optimized_dirname(os.path.basename(root)):
             continue
         err_fn = None
         if pose_e_path_yaw_nm in files:

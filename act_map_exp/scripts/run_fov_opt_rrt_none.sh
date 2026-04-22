@@ -12,6 +12,7 @@ default_points3d_r2="${root_dir}/act_map_exp/exp_data/warehouse_base_model_r2_a2
 default_points3d_r1="${root_dir}/act_map_exp/exp_data/warehouse_base_model_r1_a30/sparse/0/points3D.txt"
 default_points3d_legacy="${root_dir}/act_map_exp/localization/warehouse_base/sparse/0/points3D.txt"
 points3d="${FOV_POINTS3D:-${default_points3d_r2}}"
+output_dir_name="${FOV_OPT_OUTPUT_DIR_NAME:-optimized}"
 
 if [[ ! -x "${manifold_bin}" ]]; then
   echo "Missing manifold binary: ${manifold_bin}" >&2
@@ -87,7 +88,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --normal|--both)
-      echo "Error: only optimized_path_yaw is supported now (use --along-path or no mode)." >&2
+      echo "Error: only optimized is supported now (use --along-path or no mode)." >&2
       exit 2
       ;;
     --dataset)
@@ -109,6 +110,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --dataset r2_a20|r1_a30" >&2
       echo "  --trace-root PATH" >&2
       echo "  --points3d PATH" >&2
+      echo "Env: FOV_OPT_OUTPUT_DIR_NAME (default: optimized)" >&2
       exit 0
       ;;
     *)
@@ -167,7 +169,7 @@ fi
 
 for view in "${views[@]}"; do
   input_dir="${trace_root}/${view}/${view}_none"
-  output_dir_path_yaw="${input_dir}/optimized_path_yaw"
+  output_dir_path_yaw="${input_dir}/${output_dir_name}"
   if [[ ! -d "${input_dir}" ]]; then
     echo "Missing input dir: ${input_dir}" >&2
     continue

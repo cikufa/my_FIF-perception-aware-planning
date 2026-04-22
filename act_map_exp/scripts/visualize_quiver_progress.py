@@ -68,12 +68,12 @@ def resolve_run_dir(
 ) -> Path:
     if run_dir:
         return Path(run_dir).expanduser().resolve()
-    return (
-        Path(trace_root).expanduser().resolve()
-        / view
-        / f"{view}_{variant}"
-        / "optimized_path_yaw"
-    )
+    base = Path(trace_root).expanduser().resolve() / view / f"{view}_{variant}"
+    for cand_name in ("optimized", "optimized_path_yaw"):
+        cand = base / cand_name
+        if cand.exists():
+            return cand
+    return base / "optimized"
 
 
 def resolve_quiver_file(run_dir: Path) -> Path:
@@ -141,7 +141,7 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument("--run-dir", default="",
-                        help="Direct path to optimized_path_yaw folder.")
+                        help="Direct path to optimized folder.")
     parser.add_argument("--trace-root", default=str(default_trace),
                         help="Trace root used with --view/--variant.")
     parser.add_argument("--view", default="top", choices=["top", "diagonal", "bottom"],
@@ -151,7 +151,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--path-yaw",
         action="store_true",
-        help="Deprecated; optimized_path_yaw is always used.",
+        help="Deprecated; optimized folders are always used.",
     )
 
     parser.add_argument("--quivers", default="",

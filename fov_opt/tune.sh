@@ -44,7 +44,7 @@ while [[ $# -gt 0 ]]; do
       along="along"
       ;;
     --normal)
-      echo "Error: only optimized_path_yaw is supported now (use --along-path or no mode)." >&2
+      echo "Error: only optimized is supported now (use --along-path or no mode)." >&2
       exit 2
       ;;
     --dataset)
@@ -128,7 +128,7 @@ optuna_dir.mkdir(parents=True, exist_ok=True)
 def pose_files(trace_root: Path, path_yaw: bool):
     out = []
     for view in views:
-        out.append(str(trace_root / view / f"{view}_none" / "optimized_path_yaw" / "pose_errors.txt"))
+        out.append(str(trace_root / view / f"{view}_none" / "optimized" / "pose_errors.txt"))
     return out
 
 def opt_cmd(ds: str):

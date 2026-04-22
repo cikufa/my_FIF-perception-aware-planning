@@ -6,7 +6,7 @@ registration_stats.csv files (as written by analyze_pose_errors.py).
 Expected layout:
   <base>/<map_dir>/<trajectory>/registration_stats.csv
   <base>/<map_dir>/<trajectory>/analysis_cfg.yaml  (optional; maps row names to types)
-  optimized(ours): <base>/<map_dir>/<traj>/<traj>_none/optimized_path_yaw/pose_errors.txt
+  optimized(ours): <base>/<map_dir>/<traj>/<traj>_none/optimized/pose_errors.txt
     (or pose_errors_path_yaw.txt if present — same preference as analyze_pose_errors.py)
 
 CSV columns: name,non_registered_ratio,registered_ratio,n_failed,n_total
@@ -80,15 +80,17 @@ def _analysis_thresholds(yaml_path):
 
 
 def _optimized_pose_error_path(base, map_dir, traj_key):
-    opt_dir = os.path.join(
-        base, map_dir, traj_key, "{}_none".format(traj_key), "optimized_path_yaw"
+    base_dir = os.path.join(
+        base, map_dir, traj_key, "{}_none".format(traj_key)
     )
-    path_yaw = os.path.join(opt_dir, POSE_E_PATH_YAW_NM)
-    plain = os.path.join(opt_dir, POSE_E_NM)
-    if os.path.isfile(path_yaw):
-        return path_yaw
-    if os.path.isfile(plain):
-        return plain
+    for opt_dir_name in ("optimized", "optimized_path_yaw"):
+        opt_dir = os.path.join(base_dir, opt_dir_name)
+        path_yaw = os.path.join(opt_dir, POSE_E_PATH_YAW_NM)
+        plain = os.path.join(opt_dir, POSE_E_NM)
+        if os.path.isfile(path_yaw):
+            return path_yaw
+        if os.path.isfile(plain):
+            return plain
     return None
 
 

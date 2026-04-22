@@ -4,6 +4,7 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script="${root_dir}/act_map_exp/scripts/run_fov_opt_rrt_none.sh"
 config="${FOV_TUNE_CONFIG:-${root_dir}/fov_opt/optuna_fov_tune.yaml}"
+default_esdf="${root_dir}/act_map_exp/exp_data/warehouse_voxblox/tsdf_esdf_max10.vxblx"
 export FOV_TUNE_CONFIG="${config}"
 
 if [[ ! -x "${script}" ]]; then
@@ -18,6 +19,11 @@ Usage: $(basename "$0") [--along-path] [--dataset NAME] [--trace-root PATH] [vie
   --dataset     r2_a20, r1_a30, or both (sets trace root and points3d defaults).
   --trace-root  Override trace root directory.
   --points3d    Override points3D.txt path.
+  --output-dir-name NAME    Output subdirectory under each <view>_none.
+  --with-ray-occlusion     Enable ESDF ray-based occlusion filtering.
+  --without-ray-occlusion  Disable ESDF ray-based occlusion filtering.
+  --compare-ray-occlusion  Run both with and without ray-based occlusion.
+  --esdf PATH   Override ESDF map path (also enables ray-based occlusion).
   --config      Override optuna_fov_tune.yaml.
   --summarize   Summarize quiver metrics after optimization (same params/config).
                Writes *_pose_metrics_progress_full.csv when debug logs are available.
@@ -34,6 +40,10 @@ views=()
 dataset=""
 trace_root_override=""
 points3d_override=""
+output_dir_name=""
+occlusion_mode="env"
+compare_ray_occlusion=false
+esdf_override=""
 config_override=""
 best_params_override=""
 dataset_mode="single"
@@ -46,7 +56,7 @@ print_params=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --normal|--both)
-      echo "Error: only optimized_path_yaw is supported now (use --along-path or no mode)." >&2
+      echo "Error: only optimized is supported now (use --along-path or no mode)." >&2
       exit 2
       ;;
     --along-path|--along_path)
@@ -74,6 +84,32 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       points3d_override="$2"
+      shift
+      ;;
+    --output-dir-name|--output_dir_name)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --output-dir-name" >&2
+        exit 2
+      fi
+      output_dir_name="$2"
+      shift
+      ;;
+    --with-ray-occlusion|--with-occlusion)
+      occlusion_mode="with"
+      ;;
+    --without-ray-occlusion|--without-occlusion)
+      occlusion_mode="without"
+      ;;
+    --compare-ray-occlusion|--compare-occlusion)
+      compare_ray_occlusion=true
+      ;;
+    --esdf|--esdf-map|--esdf_map)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --esdf" >&2
+        exit 2
+      fi
+      esdf_override="$2"
+      occlusion_mode="with"
       shift
       ;;
     --config|--tune-config|--tune_config)
@@ -176,6 +212,30 @@ if [[ -n "${points3d_override}" ]]; then
   export FOV_POINTS3D="${points3d_override}"
 fi
 
+if [[ -n "${esdf_override}" ]]; then
+  if [[ ! -f "${esdf_override}" ]]; then
+    echo "ESDF map not found: ${esdf_override}" >&2
+    exit 1
+  fi
+fi
+
+if [[ "${occlusion_mode}" == "with" ]]; then
+  esdf_path="${esdf_override:-${FOV_OPT_ESDF_PATH:-${default_esdf}}}"
+  if [[ ! -f "${esdf_path}" ]]; then
+    echo "ESDF map not found: ${esdf_path}" >&2
+    exit 1
+  fi
+  export FOV_OPT_ESDF_PATH="${esdf_path}"
+elif [[ "${occlusion_mode}" == "without" ]]; then
+  unset FOV_OPT_ESDF_PATH
+elif [[ -n "${esdf_override}" ]]; then
+  export FOV_OPT_ESDF_PATH="${esdf_override}"
+fi
+
+if [[ -n "${output_dir_name}" ]]; then
+  export FOV_OPT_OUTPUT_DIR_NAME="${output_dir_name}"
+fi
+
 export_cmds="$(
   python3 - <<'PY'
 import os
@@ -225,6 +285,10 @@ if best_path and best_file is None and not prefer_config:
         cand = config_path.parent / cand
     if cand.exists() and best_file is None:
         best_file = cand
+    elif best_file is None:
+        local_cand = config_path.parent / "optuna" / "optuna_best_params.yaml"
+        if local_cand.exists():
+            best_file = local_cand
 
 supported = {
     "max_iteration",
@@ -397,6 +461,33 @@ summarize_quivers() {
   python3 "${summary_script}" "${base_args[@]}"
 }
 
+run_optimize_once() {
+  local trace_root="$1"
+  local points3d="$2"
+  local occlusion_setting="$3"
+  local output_name="$4"
+  local esdf_path_local="${5:-}"
+
+  local -a env_args=(
+    "FOV_TRACE_ROOT=${trace_root}"
+    "FOV_POINTS3D=${points3d}"
+    "FOV_OPT_OUTPUT_DIR_NAME=${output_name}"
+  )
+
+  if [[ "${occlusion_setting}" == "with" ]]; then
+    local resolved_esdf="${esdf_path_local:-${FOV_OPT_ESDF_PATH:-${default_esdf}}}"
+    if [[ ! -f "${resolved_esdf}" ]]; then
+      echo "ESDF map not found: ${resolved_esdf}" >&2
+      return 1
+    fi
+    env_args+=("FOV_OPT_ESDF_PATH=${resolved_esdf}")
+    env "${env_args[@]}" "${script}" "${cmd_args[@]}"
+    return $?
+  fi
+
+  env -u FOV_OPT_ESDF_PATH "${env_args[@]}" "${script}" "${cmd_args[@]}"
+}
+
 if [[ "${dataset_mode}" == "both" ]]; then
   if [[ -n "${trace_root_override}" || -n "${points3d_override}" ]]; then
     echo "--dataset both cannot be combined with --trace-root or --points3d" >&2
@@ -406,12 +497,16 @@ if [[ "${dataset_mode}" == "both" ]]; then
   points3d_r1="${default_points3d_r1}"
   trace_root_r2="${root_dir}/act_map_exp/trace_r2_a20"
   points3d_r2="${default_points3d_r2}"
-  FOV_TRACE_ROOT="${trace_root_r1}" \
-  FOV_POINTS3D="${points3d_r1}" \
-    "${script}" "${cmd_args[@]}"
-  FOV_TRACE_ROOT="${trace_root_r2}" \
-  FOV_POINTS3D="${points3d_r2}" \
-    "${script}" "${cmd_args[@]}"
+  if [[ "${compare_ray_occlusion}" == "true" ]]; then
+    base_name="${output_dir_name:-optimized}"
+    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "with" "${base_name}_with_ray_occlusion" "${FOV_OPT_ESDF_PATH:-}"
+    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "without" "${base_name}_without_ray_occlusion"
+    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "with" "${base_name}_with_ray_occlusion" "${FOV_OPT_ESDF_PATH:-}"
+    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "without" "${base_name}_without_ray_occlusion"
+  else
+    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "${occlusion_mode}" "${output_dir_name:-optimized}" "${FOV_OPT_ESDF_PATH:-}"
+    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "${occlusion_mode}" "${output_dir_name:-optimized}" "${FOV_OPT_ESDF_PATH:-}"
+  fi
   if [[ "${summarize}" == "true" ]]; then
     summarize_quivers "${trace_root_r1}" "${points3d_r1}"
     summarize_quivers "${trace_root_r2}" "${points3d_r2}"
@@ -423,9 +518,13 @@ resolved="$(resolve_paths "${dataset}")"
 trace_root="${resolved%%|*}"
 points3d="${resolved#*|}"
 
-FOV_TRACE_ROOT="${trace_root}" \
-FOV_POINTS3D="${points3d}" \
-  "${script}" "${cmd_args[@]}"
+if [[ "${compare_ray_occlusion}" == "true" ]]; then
+  base_name="${output_dir_name:-optimized}"
+  run_optimize_once "${trace_root}" "${points3d}" "with" "${base_name}_with_ray_occlusion" "${FOV_OPT_ESDF_PATH:-}"
+  run_optimize_once "${trace_root}" "${points3d}" "without" "${base_name}_without_ray_occlusion"
+else
+  run_optimize_once "${trace_root}" "${points3d}" "${occlusion_mode}" "${output_dir_name:-optimized}" "${FOV_OPT_ESDF_PATH:-}"
+fi
 
 if [[ "${summarize}" == "true" ]]; then
   summarize_quivers "${trace_root}" "${points3d}"

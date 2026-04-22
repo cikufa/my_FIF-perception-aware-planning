@@ -15,7 +15,7 @@ usage() {
   cat <<USAGE
 Usage: $(basename "$0") [--xyz] [--full] [--no-merge] [analyze_all.py args...]
 
-  Default: traj_opt + warehouse_all.yaml, and pulls optimized_path_yaw TE/RE from
+  Default: traj_opt + warehouse_all.yaml, and pulls optimized TE/RE from
             traj_opt_xyz (same warehouse_* names). FoV outputs live only under xyz.
 
   --xyz:       analyze traj_opt_xyz only (no merge; none + optimized there).

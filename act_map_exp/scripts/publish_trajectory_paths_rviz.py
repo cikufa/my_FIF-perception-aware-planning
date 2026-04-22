@@ -7,7 +7,7 @@ Translation is taken from the last column of the upper 3x4 block (camera/world p
 
 Typical layout:
   <root>/<traj>/<traj>_none/stamped_Twc.txt          (baseline)
-  <root>/<traj>/<traj>_none/optimized_path_yaw/stamped_Twc.txt  (ours)
+  <root>/<traj>/<traj>_none/optimized/stamped_Twc.txt  (ours)
 
 Example (after sourcing your ROS workspace):
   python3 publish_trajectory_paths_rviz.py \\
@@ -45,11 +45,17 @@ def default_paths(root: Path, traj: str) -> tuple[Path, Path]:
         alt = base / "stamped_Twc_path_yaw.txt"
         if alt.exists():
             baseline = alt
-    optimized = base / "optimized_path_yaw" / "stamped_Twc.txt"
+    optimized = base / "optimized" / "stamped_Twc.txt"
     if not optimized.exists():
-        alt2 = base / "optimized_path_yaw" / "stamped_Twc_path_yaw.txt"
-        if alt2.exists():
-            optimized = alt2
+        for opt_dir_name in ("optimized", "optimized_path_yaw"):
+            alt1 = base / opt_dir_name / "stamped_Twc.txt"
+            alt2 = base / opt_dir_name / "stamped_Twc_path_yaw.txt"
+            if alt1.exists():
+                optimized = alt1
+                break
+            if alt2.exists():
+                optimized = alt2
+                break
     return baseline, optimized
 
 

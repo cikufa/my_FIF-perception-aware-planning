@@ -11,8 +11,17 @@ usage() {
 Usage: $(basename "$0") [--map r2_a20|r1_a30] [optimize.sh args...]
 
   Default: FoV optimize under trace/trace_rrt_<map>
-           (RRT none baselines, output in *_none/optimized_path_yaw).
+           (RRT none baselines, output in *_none/optimized).
   --map:   choose dataset/map root. Default: r2_a20.
+  --output-dir-name NAME:
+           forwarded to optimize.sh; changes the output subdirectory name.
+  --with-ray-occlusion / --with-occlusion:
+           enable ESDF ray-based occlusion filtering (default).
+  --without-ray-occlusion / --without-occlusion:
+           disable ESDF ray-based occlusion filtering.
+  --compare-ray-occlusion:
+           forwarded to optimize.sh; writes sibling with/without-ray runs.
+  --esdf:  override ESDF map path (also enables ray-based occlusion).
 
 Auto-configures:
   - trace root
@@ -23,11 +32,13 @@ Auto-configures:
 Forwards all other arguments to optimize.sh (e.g. --summarize or explicit view names).
 
 Env: same as optimize.sh for tuning/summary options. This wrapper hardcodes
-     FOV_MANIFOLD_BIN and FOV_OPT_ESDF_PATH.
+     FOV_MANIFOLD_BIN and enables FOV_OPT_ESDF_PATH by default unless disabled.
 USAGE
 }
 
 map_name="${FOV_RRT_MAP:-r2_a20}"
+occlusion_mode="with"
+esdf_override=""
 extra_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -38,6 +49,21 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       map_name="$2"
+      shift
+      ;;
+    --with-ray-occlusion|--with-occlusion)
+      occlusion_mode="with"
+      ;;
+    --without-ray-occlusion|--without-occlusion)
+      occlusion_mode="without"
+      ;;
+    --esdf|--esdf-map|--esdf_map)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --esdf" >&2
+        exit 2
+      fi
+      esdf_override="$2"
+      occlusion_mode="with"
       shift
       ;;
     -h|--help)
@@ -78,11 +104,16 @@ if [[ ! -x "${default_manifold_bin}" ]]; then
 fi
 export FOV_MANIFOLD_BIN="${default_manifold_bin}"
 
-if [[ ! -f "${default_esdf}" ]]; then
-  echo "Hardcoded ESDF map not found: ${default_esdf}" >&2
-  exit 1
+if [[ "${occlusion_mode}" == "with" ]]; then
+  esdf_path="${esdf_override:-${FOV_OPT_ESDF_PATH:-${default_esdf}}}"
+  if [[ ! -f "${esdf_path}" ]]; then
+    echo "ESDF map not found: ${esdf_path}" >&2
+    exit 1
+  fi
+  export FOV_OPT_ESDF_PATH="${esdf_path}"
+else
+  unset FOV_OPT_ESDF_PATH
 fi
-export FOV_OPT_ESDF_PATH="${default_esdf}"
 
 exec "${root_dir}/fov_opt/optimize.sh" \
   --trace-root "${trace_root}" \

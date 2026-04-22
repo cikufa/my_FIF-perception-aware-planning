@@ -15,6 +15,7 @@ init(autoreset=True)
 VERBOSE = False
 PROGRESS = False
 SHOW_SUBPROCESS = False
+OPTIMIZED_DIR_NAMES = ('optimized', 'optimized_path_yaw')
 
 
 def log(msg):
@@ -78,6 +79,20 @@ def _ensure_along_path_output(input_dir, output_dir, gen_path_yaw_sc, allow_gene
 def _copy_if_exists(src, dst):
     if os.path.exists(src) and not os.path.exists(dst):
         shutil.copy2(src, dst)
+
+
+def _resolve_optimized_dir(opt_dir):
+    abs_opt_dir = os.path.abspath(opt_dir)
+    candidates = [abs_opt_dir]
+    base = abs_opt_dir.rstrip(os.sep)
+    for suffix in OPTIMIZED_DIR_NAMES:
+        if base.endswith(os.sep + suffix) or base.endswith('/' + suffix):
+            continue
+        candidates.append(base + os.sep + suffix)
+    for cand in candidates:
+        if os.path.exists(cand):
+            return cand
+    return None
 
 
 def _parseConfig(cfg_fn):
@@ -258,7 +273,7 @@ if __name__ == '__main__':
     parser.add_argument('--skip_reg', action='store_true', dest='skip_reg')
     parser.add_argument('--skip_eval', action='store_true', dest='skip_eval')
     parser.add_argument('--only_optimized', action='store_true',
-                        help='when set, run steps only for optimized_path_yaw outputs')
+                        help='when set, run steps only for optimized outputs')
     parser.add_argument('--only_along_path', action='store_true',
                         help='run only along_path baseline from base none (no variations or optimized)')
     parser.add_argument('--skip_optimized', action='store_true',
@@ -286,7 +301,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--exp_nm_rm_sufix', type=str, default='_base')
     parser.add_argument('--along_path', action='store_true',
-                        help='use along_path / optimized_path_yaw outputs')
+                        help='use along_path / optimized outputs')
     parser.add_argument('--no_generate_along_path', action='store_true',
                         help='do not generate along_path poses; require them to exist already')
     parser.add_argument('--verbose', action='store_true',
@@ -448,22 +463,18 @@ if __name__ == '__main__':
             var_entries = []
 
             def _append_opt_entries(opt_dir):
-                abs_opt_dir = os.path.abspath(opt_dir)
-                if abs_opt_dir.endswith("_path_yaw"):
-                    abs_opt_path_yaw = abs_opt_dir
-                else:
-                    abs_opt_path_yaw = abs_opt_dir.rstrip(os.sep) + "_path_yaw"
-                if os.path.exists(abs_opt_path_yaw):
+                abs_opt_path_yaw = _resolve_optimized_dir(opt_dir)
+                if abs_opt_path_yaw is not None:
                     var_entries.append({
-                        'name': 'optimized_path_yaw',
+                        'name': 'optimized',
                         'type': 'optimized_path_yaw',
                         'outdir': abs_opt_path_yaw,
                         'cfg_fn': None,
                         'path_yaw': True
                     })
                     return True
-                log(Fore.RED + "Optimized path-yaw directory does not exist: {}".format(
-                    abs_opt_path_yaw))
+                log(Fore.RED + "Optimized directory does not exist: {}".format(
+                    opt_dir))
                 failed_cfgs.append(base_f_i + '-optimized-path-yaw-missing')
                 return False
 
@@ -798,7 +809,7 @@ if __name__ == '__main__':
                         continue
                     eval_outdir_i = outdir_i
                     if entry_path_yaw:
-                        eval_outdir_i = os.path.join(outdir_i, 'eval{}'.format(path_suffix))
+                        eval_outdir_i = os.path.join(outdir_i, 'eval')
                         if not os.path.exists(eval_outdir_i):
                             os.makedirs(eval_outdir_i)
                     eval_cmd = ("{} --reg_model_dir {} --reg_img_name_to_colmap_Tcw {}"

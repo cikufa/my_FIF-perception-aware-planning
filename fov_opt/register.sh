@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
       with_along_path=false
       ;;
     --normal|--both)
-      echo "Error: only optimized_path_yaw is supported now (no --normal/--both)." >&2
+      echo "Error: only optimized is supported now (no --normal/--both)." >&2
       exit 2
       ;;
     --dataset)

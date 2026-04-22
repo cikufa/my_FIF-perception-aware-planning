@@ -261,6 +261,9 @@ def build_markers(frame, namespace, pos_all, dir_all, pose_index, points,
             if vis_idx.size > 0:
                 vis_idx = vis_idx[(vis_idx >= 0) & (vis_idx < points.shape[0])]
         else:
+            if cos_fov is None:
+                raise RuntimeError(
+                    "No saved visible-feature sidecar found and --fov-deg was not provided.")
             vis_idx = compute_visible_indices(pos, direction, points, cos_fov, min_range, max_range)
         if it == 0:
             init_count = int(vis_idx.size)
@@ -307,7 +310,7 @@ def parse_args():
     parser.add_argument("--topic", default="fov_pose_story/markers")
     parser.add_argument("--namespace", default="fov_pose_story")
     parser.add_argument("--pose-index", type=int, default=7)
-    parser.add_argument("--fov-deg", type=float, default=60.0)
+    parser.add_argument("--fov-deg", type=float, default=None)
     parser.add_argument("--min-range", type=float, default=0.0)
     parser.add_argument("--max-range", type=float, default=-1.0)
     parser.add_argument("--point-stride", type=int, default=1)
@@ -315,6 +318,7 @@ def parse_args():
     parser.add_argument("--path-width-scale", type=float, default=0.006)
     parser.add_argument("--arrow-scale", type=float, default=0.06)
     parser.add_argument("--feature-scale", type=float, default=0.015)
+    parser.add_argument("--require-saved-features", action="store_true")
     parser.add_argument("--show-path-arrows", action="store_true")
     args, _ = parser.parse_known_args()
     return args
@@ -336,6 +340,10 @@ def main():
 
     visible_feature_path = resolve_visible_feature_path(quiver_path)
     visible_idx_per_iter = None
+    if args.require_saved_features and not visible_feature_path:
+        raise RuntimeError(
+            "Saved visible-feature sidecar is required for {} but none was found.".format(
+                quiver_path))
     point_stride = max(1, args.point_stride)
     max_points = max(0, args.max_points)
     if visible_feature_path:
@@ -364,7 +372,12 @@ def main():
     arrow_head_d = path_width * 2.2
     arrow_head_len = path_width * 2.8
     point_scale = max(path_width * 0.6, diag * max(0.001, args.feature_scale))
-    cos_fov = np.cos(np.deg2rad(args.fov_deg) * 0.5)
+    cos_fov = None
+    if not visible_feature_path:
+        if args.fov_deg is None:
+            raise ValueError(
+                "--fov-deg is required when no saved visible-feature sidecar is available.")
+        cos_fov = np.cos(np.deg2rad(args.fov_deg) * 0.5)
 
     msg = build_markers(
         frame=args.frame,

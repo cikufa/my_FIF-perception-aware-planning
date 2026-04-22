@@ -182,7 +182,7 @@ def _latex_planning_table(root: Path, datasets, views, types):
                     rrt_t = _mean(_read_float_file(trace / v / f"{v}_none" / "rrt_plan_time_sec.txt"))
                     opt_t = _mean(
                         _read_float_file(
-                            trace / v / f"{v}_none" / "optimized_path_yaw" / "optimization_time_sec.txt"
+                            trace / v / f"{v}_none" / "optimized" / "optimization_time_sec.txt"
                         )
                     )
                     if math.isfinite(iters):

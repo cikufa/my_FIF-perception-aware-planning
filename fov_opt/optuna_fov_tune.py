@@ -587,7 +587,7 @@ def _augment_reg_cmd_with_trial_paths(cmd, trace_root):
         if base_names:
             opt_specs = []
             for name in base_names:
-                opt_dir = Path(trace_root) / name / f"{name}_none" / "optimized_path_yaw"
+                opt_dir = Path(trace_root) / name / f"{name}_none" / "optimized"
                 opt_specs.append(f"{name}={opt_dir}")
             tokens += ["--optimized_dirs"] + opt_specs
     return " ".join(shlex.quote(tok) for tok in tokens)
