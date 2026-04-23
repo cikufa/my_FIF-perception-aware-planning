@@ -476,6 +476,14 @@ run_optimize_once() {
     "FOV_OPT_OUTPUT_DIR_NAME=${output_name}"
   )
 
+  if [[ "${occlusion_setting}" == "env" ]]; then
+    if [[ -n "${esdf_path_local}" || -n "${FOV_OPT_ESDF_PATH:-}" ]]; then
+      occlusion_setting="with"
+    else
+      occlusion_setting="without"
+    fi
+  fi
+
   if [[ "${occlusion_setting}" == "with" ]]; then
     local resolved_esdf="${esdf_path_local:-${FOV_OPT_ESDF_PATH:-${default_esdf}}}"
     if [[ ! -f "${resolved_esdf}" ]]; then
