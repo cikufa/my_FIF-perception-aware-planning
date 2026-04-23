@@ -440,6 +440,109 @@ Your intended flow is:
 
 - What it does: keeps variants + optimized in one tree (`traj_opt`), disables split-tree merge logic.
 
+---
+
+### YAML-driven trajectory-optimization pipeline (`trajopt_pipeline.yaml`)
+
+`register_trajopt.sh` and `analyze_trajopt.sh` can be driven directly from a
+single master config, **`fov_opt/trajopt_pipeline.yaml`**, which is the
+recommended entrypoint for the w_occ / wo_occ comparison (rendering + eval go
+directly under `optimized_w_occ/` or `optimized_wo_occ/`, not
+`optimized_path_yaw/`).
+
+Relevant CLI flags (both scripts share them):
+
+| Flag | Effect |
+| --- | --- |
+| `--pipeline-cfg FILE` | Parse this YAML and auto-generate planner + defaults YAMLs under `fov_opt/.generated/`. Implied by `--map` / `--occ` / `--optimized-subdir`. |
+| `--map {r2_a20\|r1_a30}` (alias `--dataset`) | Override the `dataset` key in the YAML. Controls which `traj_opt_<map>` trace tree is used. Trajectory / variation selection stays in the YAML. |
+| `--occ {w_occ\|wo_occ\|path_yaw}` | Picks which optimized subdir to work with. `w_occ`/`wo_occ` target `optimized_w_occ` / `optimized_wo_occ`; `path_yaw` keeps the legacy `optimized_path_yaw`. |
+| `--optimized-subdir NAME` | Fully custom optimized-subdir name (bypasses `--occ`). |
+
+Minimal runs on `r2_a20`:
+
+```bash
+# Register FoV-optimized xyz trajectories, writing into optimized_w_occ:
+./fov_opt/register_trajopt.sh --map r2_a20 --occ w_occ
+
+# Register the Fisher variants under traj_opt/ (once per dataset is enough):
+./fov_opt/register_trajopt.sh --map r2_a20 --variants
+
+# Analyze merged comparison: traj_opt (Fisher variants) + traj_opt_xyz (ours=w_occ):
+./fov_opt/analyze_trajopt.sh --map r2_a20 --occ w_occ
+
+# Same comparison but using wo_occ outputs as "ours":
+./fov_opt/analyze_trajopt.sh --map r2_a20 --occ wo_occ
+
+# Sanity check on FoV-only (xyz tree only, no Fisher comparison):
+./fov_opt/analyze_trajopt.sh --map r2_a20 --occ w_occ   # analyze.mode: xyz_only in YAML
+```
+
+Selecting a subset of trajectories / variations is YAML-only; edit the
+`register_variants` / `register_optimized` / `analyze` sections of
+`trajopt_pipeline.yaml`:
+
+```yaml
+register_optimized:
+  trajectories: [warehouse_mid, warehouse_top]
+  variations:   [none]
+
+analyze:
+  mode:         merge        # merge | xyz_only | full
+  trajectories: [warehouse_mid, warehouse_top]
+  variations:   [none, gp_det, quad_det]
+```
+
+`trajectories: null` (or a missing list) means "use every entry in
+`trajectories_all`". `variations: null` means "keep every variation present
+on disk".
+
+Implementation notes:
+
+- The scripts parse the YAML with an inline Python heredoc and emit runtime
+  planner/defaults YAMLs into **`fov_opt/.generated/`** (gitignored).
+- Downstream Python (`run_planner_exp.py`, `analyze_pose_errors.py`) reads
+  the environment variable **`FOV_OPTIMIZED_DIR_NAMES`** that the scripts
+  export, so `optimized_w_occ` and `optimized_wo_occ` stay in separate
+  analyses and never mix.
+- `analyze_trajopt.sh` temporarily filters each trajectory's
+  `analysis_cfg.yaml` down to the variants requested in the YAML and
+  restores it via a shell trap when the run exits (or fails).
+- Matplotlib TeX cache: if your `~/.cache/matplotlib` is not writable, run
+  with `MPLCONFIGDIR=fov_opt/.mplcache ./fov_opt/analyze_trajopt.sh ...`
+  (the path is gitignored).
+
+### Registration-failure thresholds
+
+Pose-error statistics treat each rendered frame as a **success/failure**
+event using fixed thresholds in
+`act_map_exp/params/quad_traj_opt/base_analysis_cfg.yaml`:
+
+```yaml
+hist_max_trans_e: 1.0    # translation cap τ_t, metres
+hist_max_rot_e:   10     # rotation cap τ_r, degrees
+```
+
+A frame is a failure iff `e_t > τ_t` OR `e_r > τ_r`; failed frames are
+masked with NaN before any aggregation. The analyzer then reports three
+complementary summaries under `analysis_outputs/{finite,original,penalized}/`:
+
+- **`finite/`** — stats over the success set only, paired with the per-method
+  failure rate `ρ = (#NaN) / N`. Use for "how accurate when it works".
+- **`penalized/`** — NaNs replaced by the threshold before aggregation, so the
+  reported mean is  
+  `ē_pen = (1 − ρ)·ē_fin + ρ·τ`.  
+  This is the fair single-number metric: a method cannot lower it by failing
+  more often. Recommended as the headline accuracy number alongside `ρ`.
+- **`original/`** — NaNs rendered at `1.2·τ` for violin plots only, so the
+  failure mass shows as a distinct band above the success distribution. Never
+  used for numerical comparison.
+
+Note: violin axis limits in `analyze_pose_errors.py` are currently fixed at
+`VIOLIN_YLIM_TE = (0, 1.0)` and `VIOLIN_YLIM_RE = (0, 10.0)`; when using
+`original/` mode the `1.2·τ` spike sits just above the axis and gets clipped.
+Bump these constants if you want the failure band visible in the plot.
+
 ### End-to-end pipeline (traj opt + FoV + UE + TE/RE)
 
 1. **Planning (outside these scripts)** saves stamped poses under e.g. `.../warehouse_top/warehouse_top_none/` (`stamped_Twc.txt`, UE convention files, etc.).

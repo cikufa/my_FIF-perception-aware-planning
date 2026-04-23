@@ -54,5 +54,5 @@ iter_cost_plot:
     - quad_trace
     - pc_det
     - pc_trace
-hist_max_trans_e: 0.5
-hist_max_rot_e: 5
+hist_max_trans_e: 1.0
+hist_max_rot_e: 10
