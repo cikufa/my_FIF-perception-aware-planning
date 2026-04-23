@@ -15,7 +15,14 @@ init(autoreset=True)
 VERBOSE = False
 PROGRESS = False
 SHOW_SUBPROCESS = False
-OPTIMIZED_DIR_NAMES = ('optimized', 'optimized_path_yaw')
+_DEFAULT_OPTIMIZED_DIR_NAMES = ('optimized', 'optimized_path_yaw')
+_env_opt_names = os.environ.get('FOV_OPTIMIZED_DIR_NAMES', '').strip()
+if _env_opt_names:
+    OPTIMIZED_DIR_NAMES = tuple(
+        n.strip() for n in _env_opt_names.split(',') if n.strip()
+    )
+else:
+    OPTIMIZED_DIR_NAMES = _DEFAULT_OPTIMIZED_DIR_NAMES
 
 
 def log(msg):

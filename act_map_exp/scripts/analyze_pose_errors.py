@@ -19,7 +19,14 @@ pose_e_nm = 'pose_errors.txt'
 Twc_nm = 'stamped_Twc.txt'
 Twc_path_yaw_nm = 'stamped_Twc_path_yaw.txt'
 pose_e_path_yaw_nm = 'pose_errors_path_yaw.txt'
-OPTIMIZED_DIR_NAMES = ('optimized', 'optimized_path_yaw')
+_DEFAULT_OPTIMIZED_DIR_NAMES = ('optimized', 'optimized_path_yaw')
+_env_opt_names = os.environ.get('FOV_OPTIMIZED_DIR_NAMES', '').strip()
+if _env_opt_names:
+    OPTIMIZED_DIR_NAMES = tuple(
+        n.strip() for n in _env_opt_names.split(',') if n.strip()
+    )
+else:
+    OPTIMIZED_DIR_NAMES = _DEFAULT_OPTIMIZED_DIR_NAMES
 
 # Exclude only optimized from analysis outputs.
 EXCLUDE_OPTIMIZED = True

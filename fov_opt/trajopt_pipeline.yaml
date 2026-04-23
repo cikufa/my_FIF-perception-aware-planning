@@ -1,0 +1,114 @@
+# Trajectory-optimization pipeline config.
+#
+# Passed directly to the two existing shell scripts via --pipeline-cfg:
+#   fov_opt/register_trajopt.sh --variants  --pipeline-cfg fov_opt/trajopt_pipeline.yaml
+#   fov_opt/register_trajopt.sh --optimized --pipeline-cfg fov_opt/trajopt_pipeline.yaml
+#   fov_opt/analyze_trajopt.sh              --pipeline-cfg fov_opt/trajopt_pipeline.yaml
+#
+# CLI shorthands (imply --pipeline-cfg when this file is at the default path):
+#   --map DATASET (or --dataset)  override top-level `dataset` below
+#                                 (controls trace/traj_opt_<DATASET>/)
+#   --occ {w_occ,wo_occ,path_yaw} pick optimized_<value> subfolder
+#   --optimized-subdir NAME       override with an exact folder name
+# Trajectory names (warehouse_*) and variations (gp_det, ...) are only
+# configured in this YAML (register_variants / register_optimized / analyze).
+#
+# The shell scripts embed a small python3 + pyyaml block that reads this file
+# and writes the intermediate warehouse / defaults YAMLs to <generated_dir>
+# (default: <repo_root>/fov_opt/.generated/).
+#
+# Dataset/paths ------------------------------------------------------------
+dataset: r2_a20                # r2_a20 | r1_a30 (controls trace + base_model defaults)
+
+# Which optimized subfolder to render / register / analyze under each
+#   <trace_xyz>/<traj>/<traj>_<var>/<optimized_subdir>/
+# Shell override: register_trajopt.sh / analyze_trajopt.sh --occ {w_occ,wo_occ,path_yaw}
+# or --optimized-subdir <full_name>.
+optimized_subdir: optimized_w_occ
+
+paths:
+  repo_root: /home/shekoufeh/fov_ws/my_FIF-perception-aware-planning
+  # Leave any of these null to take the default derived from <repo_root>/<dataset>.
+  trace_variants: null         # default: <repo_root>/act_map_exp/trace/traj_opt_<dataset>/traj_opt
+  trace_xyz:      null         # default: <repo_root>/act_map_exp/trace/traj_opt_<dataset>/traj_opt_xyz
+  colmap_scripts: null         # default: <repo_root>/act_map_exp/colmap_scripts
+  base_model:     null         # default: <repo_root>/act_map_exp/exp_data/warehouse_base_model_<dataset>
+  warehouse_params_dir: null   # default: <repo_root>/act_map_exp/params/quad_traj_opt/warehouse
+  base_analysis_cfg:    null   # default: <repo_root>/act_map_exp/params/quad_traj_opt/base_analysis_cfg.yaml
+  generated_dir:        null   # default: <repo_root>/fov_opt/.generated (intermediate YAMLs)
+
+# Catalogues (reference; must match files in <warehouse_params_dir>/).
+trajectories_all:
+  - warehouse_top
+  - warehouse_diagonal
+  - warehouse_bottom
+  - warehouse_left
+  - warehouse_right
+  - warehouse_mid
+  - warehouse_side
+  # - warehouse_smallU
+  # - warehouse_bigU
+
+variations_all:
+  - none
+  - gp_trace
+  - gp_det
+  - quad_trace
+  - quad_det
+  - pc_trace
+  - pc_det
+
+# Per-command selection ----------------------------------------------------
+
+# register_trajopt.sh --variants: registers planned Fisher variants under the
+# trace_variants tree. Uses <warehouse_params_dir>/<traj>_base.yaml and
+# variations/<var>.yaml.
+#
+# Set `trajectories` / `variations` to a YAML list to run only that subset.
+# Use null (or comment the list out) to use the full catalogue above.
+#   trajectories: [warehouse_mid, warehouse_top]
+#   variations:   [none, gp_det, quad_det]
+register_variants:
+  trajectories: null
+  variations:   null
+  along_path:   false          # true -> pass --along-path to register_trajopt.sh
+  extra_args:   []             # forwarded to run_planner_exp.py (after --)
+
+# register_trajopt.sh --optimized: registers FoV-optimized outputs on the
+# trace_xyz tree. Outputs (rendering/, eval/, pose_errors.txt,
+# registered_poses_ue.txt) are written directly under
+#   .../<traj>/<traj>_<var>/<optimized_subdir>/
+# with <optimized_subdir> coming from the top-level `optimized_subdir` key
+# (or the --occ / --optimized-subdir CLI override).
+#
+# In practice only `none` has an optimized folder (optimize_trajopt.sh takes
+# the _none trajectory as input). Missing <traj>/<traj>_<var>/<subdir> combos
+# are skipped silently.
+# Subset examples:
+#   trajectories: [warehouse_mid, warehouse_top]
+#   variations:   [none]
+register_optimized:
+  trajectories: null
+  variations:   [none]
+  extra_args:   []
+
+# analyze_trajopt.sh --pipeline-cfg: `mode` picks the top tree:
+#   merge    -> trace_variants as top_dir, merge optimized_path_yaw from trace_xyz
+#   xyz_only -> trace_xyz as top_dir, no merge (FoV outputs only)
+#   full     -> trace_variants as top_dir, no merge (single-tree)
+#
+# `trajectories` -> forwarded as --include-trajs to analyze_all.py (filters which
+#                    warehouse_* trees are analyzed).
+# `variations`   -> filters analysis_cfg.yaml in place during the run (and restores
+#                    it afterwards). Only keys whose `type` is in this list are
+#                    kept; `optimized_path_yaw` is always kept so "ours" stays
+#                    in the comparison. Use null to keep every variation found
+#                    on disk.
+# Subset examples:
+#   trajectories: [warehouse_mid, warehouse_top]
+#   variations:   [none, gp_det, quad_det]
+analyze:
+  mode:         merge
+  trajectories: null
+  variations:   null
+  extra_args:   []             # forwarded to analyze_all.py
