@@ -490,6 +490,30 @@ run_optimize_once() {
   env -u FOV_OPT_ESDF_PATH "${env_args[@]}" "${script}" "${cmd_args[@]}"
 }
 
+resolve_single_output_name() {
+  if [[ -n "${output_dir_name}" ]]; then
+    echo "${output_dir_name}"
+    return
+  fi
+
+  local occlusion_setting="$1"
+  if [[ "${occlusion_setting}" == "env" ]]; then
+    if [[ -n "${FOV_OPT_ESDF_PATH:-}" ]]; then
+      occlusion_setting="with"
+    else
+      occlusion_setting="without"
+    fi
+  fi
+
+  if [[ "${occlusion_setting}" == "with" ]]; then
+    echo "optimized_w_occ"
+  elif [[ "${occlusion_setting}" == "without" ]]; then
+    echo "optimized_wo_occ"
+  else
+    echo "optimized"
+  fi
+}
+
 if [[ "${dataset_mode}" == "both" ]]; then
   if [[ -n "${trace_root_override}" || -n "${points3d_override}" ]]; then
     echo "--dataset both cannot be combined with --trace-root or --points3d" >&2
@@ -501,13 +525,14 @@ if [[ "${dataset_mode}" == "both" ]]; then
   points3d_r2="${default_points3d_r2}"
   if [[ "${compare_ray_occlusion}" == "true" ]]; then
     base_name="${output_dir_name:-optimized}"
-    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "with" "${base_name}_with_ray_occlusion" "${FOV_OPT_ESDF_PATH:-}"
-    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "without" "${base_name}_without_ray_occlusion"
-    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "with" "${base_name}_with_ray_occlusion" "${FOV_OPT_ESDF_PATH:-}"
-    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "without" "${base_name}_without_ray_occlusion"
+    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "with" "${base_name}_w_occ" "${FOV_OPT_ESDF_PATH:-}"
+    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "without" "${base_name}_wo_occ"
+    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "with" "${base_name}_w_occ" "${FOV_OPT_ESDF_PATH:-}"
+    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "without" "${base_name}_wo_occ"
   else
-    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "${occlusion_mode}" "${output_dir_name:-optimized}" "${FOV_OPT_ESDF_PATH:-}"
-    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "${occlusion_mode}" "${output_dir_name:-optimized}" "${FOV_OPT_ESDF_PATH:-}"
+    single_output_name="$(resolve_single_output_name "${occlusion_mode}")"
+    run_optimize_once "${trace_root_r1}" "${points3d_r1}" "${occlusion_mode}" "${single_output_name}" "${FOV_OPT_ESDF_PATH:-}"
+    run_optimize_once "${trace_root_r2}" "${points3d_r2}" "${occlusion_mode}" "${single_output_name}" "${FOV_OPT_ESDF_PATH:-}"
   fi
   if [[ "${summarize}" == "true" ]]; then
     summarize_quivers "${trace_root_r1}" "${points3d_r1}"
@@ -522,10 +547,11 @@ points3d="${resolved#*|}"
 
 if [[ "${compare_ray_occlusion}" == "true" ]]; then
   base_name="${output_dir_name:-optimized}"
-  run_optimize_once "${trace_root}" "${points3d}" "with" "${base_name}_with_ray_occlusion" "${FOV_OPT_ESDF_PATH:-}"
-  run_optimize_once "${trace_root}" "${points3d}" "without" "${base_name}_without_ray_occlusion"
+  run_optimize_once "${trace_root}" "${points3d}" "with" "${base_name}_w_occ" "${FOV_OPT_ESDF_PATH:-}"
+  run_optimize_once "${trace_root}" "${points3d}" "without" "${base_name}_wo_occ"
 else
-  run_optimize_once "${trace_root}" "${points3d}" "${occlusion_mode}" "${output_dir_name:-optimized}" "${FOV_OPT_ESDF_PATH:-}"
+  single_output_name="$(resolve_single_output_name "${occlusion_mode}")"
+  run_optimize_once "${trace_root}" "${points3d}" "${occlusion_mode}" "${single_output_name}" "${FOV_OPT_ESDF_PATH:-}"
 fi
 
 if [[ "${summarize}" == "true" ]]; then

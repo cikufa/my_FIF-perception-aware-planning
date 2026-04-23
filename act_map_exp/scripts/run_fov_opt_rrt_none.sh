@@ -24,6 +24,16 @@ if [[ ! -f "${points3d}" ]]; then
   exit 1
 fi
 
+persistent_depthmap_worker=false
+depthmap_path="${FOV_OPT_VISIBILITY_DEPTHMAP_PATH:-${FOV_OPT_DEPTHMAP_PATH:-}}"
+if [[ "${FOV_OPT_OCCLUSION_BACKEND:-}" == "depthmap" && -n "${depthmap_path}" ]]; then
+  persistent_depthmap_worker=true
+fi
+
+worker_read_fd=""
+worker_write_fd=""
+worker_pid=""
+
 run_with_timing() {
   local out_dir="$1"
   shift
@@ -51,6 +61,87 @@ sys.exit(ret)
 PY
 }
 
+start_persistent_depthmap_worker() {
+  if [[ "${persistent_depthmap_worker}" != "true" ]]; then
+    return 0
+  fi
+  coproc FOVOPT_DEPTHMAP_WORKER { "${manifold_bin}" --server; }
+  worker_read_fd="${FOVOPT_DEPTHMAP_WORKER[0]}"
+  worker_write_fd="${FOVOPT_DEPTHMAP_WORKER[1]}"
+  worker_pid="${FOVOPT_DEPTHMAP_WORKER_PID}"
+
+  local ready_line=""
+  if ! IFS= read -r ready_line <&"${worker_read_fd}"; then
+    echo "Failed to start persistent depthmap worker." >&2
+    return 1
+  fi
+  if [[ "${ready_line}" != "READY" ]]; then
+    echo "Persistent depthmap worker init failed: ${ready_line}" >&2
+    return 1
+  fi
+}
+
+stop_persistent_depthmap_worker() {
+  if [[ -n "${worker_write_fd}" ]]; then
+    printf 'EXIT\n' >&"${worker_write_fd}" || true
+  fi
+  if [[ -n "${worker_read_fd}" ]]; then
+    local _unused=""
+    IFS= read -r _unused <&"${worker_read_fd}" || true
+  fi
+  if [[ -n "${worker_write_fd}" ]]; then
+    eval "exec ${worker_write_fd}>&-" || true
+  fi
+  if [[ -n "${worker_read_fd}" ]]; then
+    eval "exec ${worker_read_fd}<&-" || true
+  fi
+  if [[ -n "${worker_pid}" ]]; then
+    wait "${worker_pid}" 2>/dev/null || true
+  fi
+}
+
+run_with_persistent_worker_timing() {
+  local out_dir="$1"
+  local input_dir="$2"
+  local points3d="$3"
+  local warm_start_flag="${4:-0}"
+  local warm_start_file="${5:-}"
+  local runtime_file="${out_dir}/optimization_time_sec.txt"
+
+  local start_ns
+  start_ns="$(date +%s%N)"
+  printf 'JOB\t%s\t%s\t1\t%s\t%s\t%s\n' \
+    "${input_dir}" "${out_dir}" "${points3d}" "${warm_start_flag}" "${warm_start_file}" \
+    >&"${worker_write_fd}"
+
+  local tag=""
+  local result_code=""
+  local measured_ms=""
+  if ! IFS=$'\t' read -r tag result_code measured_ms <&"${worker_read_fd}"; then
+    echo "Persistent depthmap worker stopped unexpectedly." >&2
+    return 1
+  fi
+  local end_ns
+  end_ns="$(date +%s%N)"
+
+  if [[ "${tag}" != "RESULT" || "${result_code}" != "0" ]]; then
+    echo "Persistent depthmap worker failed for ${input_dir}: ${tag} ${result_code} ${measured_ms}" >&2
+    return 1
+  fi
+
+  python3 - "${runtime_file}" "${start_ns}" "${end_ns}" <<'PY'
+import sys
+
+runtime_file = sys.argv[1]
+start_ns = int(sys.argv[2])
+end_ns = int(sys.argv[3])
+elapsed = (end_ns - start_ns) / 1e9
+
+with open(runtime_file, "w") as f:
+    f.write("{:.6f}\n".format(elapsed))
+PY
+}
+
 run_along_path_opt() {
   local input_dir="$1"
   local output_dir="$2"
@@ -60,10 +151,25 @@ run_along_path_opt() {
     along_path_input="${input_dir}/along_path/stamped_Twc_path_yaw.txt"
   fi
   if [[ -f "${along_path_input}" && -z "${FOV_OPT_WARM_START:-}" && -z "${FOV_OPT_WARM_START_FILE:-}" ]]; then
-    FOV_OPT_WARM_START=1 FOV_OPT_WARM_START_FILE="${along_path_input}" \
-      run_with_timing "${output_dir}" "${manifold_bin}" "${input_dir}" "${output_dir}" 1 "${points3d}"
+    if [[ "${persistent_depthmap_worker}" == "true" ]]; then
+      run_with_persistent_worker_timing "${output_dir}" "${input_dir}" "${points3d}" "1" "${along_path_input}"
+    else
+      FOV_OPT_WARM_START=1 FOV_OPT_WARM_START_FILE="${along_path_input}" \
+        run_with_timing "${output_dir}" "${manifold_bin}" "${input_dir}" "${output_dir}" 1 "${points3d}"
+    fi
   else
-    run_with_timing "${output_dir}" "${manifold_bin}" "${input_dir}" "${output_dir}" 1 "${points3d}"
+    if [[ "${persistent_depthmap_worker}" == "true" ]]; then
+      local warm_start_flag="0"
+      local warm_start_file=""
+      if [[ -n "${FOV_OPT_WARM_START:-}" && "${FOV_OPT_WARM_START}" != "0" ]]; then
+        warm_start_flag="1"
+        warm_start_file="${FOV_OPT_WARM_START_FILE:-}"
+      fi
+      run_with_persistent_worker_timing "${output_dir}" "${input_dir}" "${points3d}" \
+        "${warm_start_flag}" "${warm_start_file}"
+    else
+      run_with_timing "${output_dir}" "${manifold_bin}" "${input_dir}" "${output_dir}" 1 "${points3d}"
+    fi
   fi
 }
 
@@ -165,6 +271,11 @@ if [[ ${#views[@]} -eq 0 ]]; then
     echo "No <view>_none inputs found under ${trace_root}" >&2
     exit 1
   fi
+fi
+
+if [[ "${persistent_depthmap_worker}" == "true" ]]; then
+  start_persistent_depthmap_worker
+  trap stop_persistent_depthmap_worker EXIT
 fi
 
 for view in "${views[@]}"; do
