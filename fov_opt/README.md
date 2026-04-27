@@ -457,26 +457,64 @@ Relevant CLI flags (both scripts share them):
 | `--pipeline-cfg FILE` | Parse this YAML and auto-generate planner + defaults YAMLs under `fov_opt/.generated/`. Implied by `--map` / `--occ` / `--optimized-subdir`. |
 | `--map {r2_a20\|r1_a30}` (alias `--dataset`) | Override the `dataset` key in the YAML. Controls which `traj_opt_<map>` trace tree is used. Trajectory / variation selection stays in the YAML. |
 | `--occ {w_occ\|wo_occ\|path_yaw}` | Picks which optimized subdir to work with. `w_occ`/`wo_occ` target `optimized_w_occ` / `optimized_wo_occ`; `path_yaw` keeps the legacy `optimized_path_yaw`. |
-| `--optimized-subdir NAME` | Fully custom optimized-subdir name (bypasses `--occ`). |
+| `--optimized-subdir NAME` | Fully custom optimized-subdir name (bypasses `--occ`). For `analyze_trajopt.sh`, accepts a **comma-separated list** (e.g. `optimized_w_occ,optimized_depthmap`) to plot each variant as its own series in the same figures. |
 
-Minimal runs on `r2_a20`:
+Default trace layout (resolved from `--map <DATASET>`):
+
+```
+act_map_exp/trace/traj_opt_<DATASET>/
+├── traj_opt/                                            # Fisher baseline + variants
+│   └── warehouse_<traj>/<traj>_<var>/{pose_errors.txt, ...}
+└── traj_opt_xyz/                                        # FoV-optimized (ours)
+    └── warehouse_<traj>/<traj>_none/
+        └── optimized_<subdir>/{pose_errors.txt, eval/, ...}
+```
+
+`<subdir>` is one of `optimized_w_occ`, `optimized_wo_occ`, `optimized_depthmap`,
+or the legacy `optimized_path_yaw`. Both `register_trajopt.sh` and
+`analyze_trajopt.sh` derive these defaults automatically; no `paths.*`
+overrides are needed for the standard layout.
+
+Minimal runs on `r1_a30`:
 
 ```bash
-# Register FoV-optimized xyz trajectories, writing into optimized_w_occ:
-./fov_opt/register_trajopt.sh --map r2_a20 --occ w_occ
+# 1. Register Fisher baseline (none, gp_*, quad_*, pc_*) under traj_opt/:
+./fov_opt/register_trajopt.sh --variants --map r1_a30
 
-# Register the Fisher variants under traj_opt/ (once per dataset is enough):
-./fov_opt/register_trajopt.sh --map r2_a20 --variants
+# 2. Register FoV-optimized variants under traj_opt_xyz/ (one variant per call):
+./fov_opt/register_trajopt.sh --optimized --map r1_a30 --optimized-subdir optimized_w_occ
+./fov_opt/register_trajopt.sh --optimized --map r1_a30 --optimized-subdir optimized_depthmap
 
-# Analyze merged comparison: traj_opt (Fisher variants) + traj_opt_xyz (ours=w_occ):
-./fov_opt/analyze_trajopt.sh --map r2_a20 --occ w_occ
+# 3a. Analyze: baselines vs single ours:
+./fov_opt/analyze_trajopt.sh --map r1_a30 --optimized-subdir optimized_w_occ
+./fov_opt/analyze_trajopt.sh --map r1_a30 --optimized-subdir optimized_depthmap
 
-# Same comparison but using wo_occ outputs as "ours":
-./fov_opt/analyze_trajopt.sh --map r2_a20 --occ wo_occ
+# 3b. Analyze: baselines vs both ours variants together (each as its own series):
+./fov_opt/analyze_trajopt.sh --map r1_a30 \
+    --optimized-subdir optimized_w_occ,optimized_depthmap
 
 # Sanity check on FoV-only (xyz tree only, no Fisher comparison):
-./fov_opt/analyze_trajopt.sh --map r2_a20 --occ w_occ   # analyze.mode: xyz_only in YAML
+./fov_opt/analyze_trajopt.sh --map r1_a30 --occ w_occ   # set analyze.mode: xyz_only in YAML
 ```
+
+For `r2_a20`, replace `--map r1_a30` with `--map r2_a20`.
+
+Multi-variant analysis:
+
+- The analyzer extension keys each entry in `FOV_OPTIMIZED_DIR_NAMES` (set
+  automatically from `--optimized-subdir`) under its own dictionary key when
+  more than one name is supplied, so `optimized_w_occ` and
+  `optimized_depthmap` appear as **distinct series** in violin/histogram/CSV
+  outputs instead of being collapsed into a single `optimized_path_yaw` line.
+- Single-name behavior is unchanged for backward compatibility — anything
+  matching the legacy `optimized_path_yaw` collapsed series still works.
+- Per-variant default labels: `optimized_w_occ → "ours (w occ)"`,
+  `optimized_wo_occ → "ours (wo occ)"`, `optimized_depthmap → "ours (depthmap)"`.
+  Override by editing `labels` / `colors` / `linestyles` in
+  `act_map_exp/params/quad_traj_opt/base_analysis_cfg.yaml`.
+- Comparison CSV (`overall_error_compare_vs_optimized.csv`) uses the **first**
+  active optimized key as the reference; the remaining optimized variants
+  appear in the table as additional rows.
 
 Selecting a subset of trajectories / variations is YAML-only; edit the
 `register_variants` / `register_optimized` / `analyze` sections of

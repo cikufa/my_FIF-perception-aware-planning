@@ -28,6 +28,49 @@ if _env_opt_names:
 else:
     OPTIMIZED_DIR_NAMES = _DEFAULT_OPTIMIZED_DIR_NAMES
 
+
+def _active_optimized_keys():
+    """Plot/stat keys for the currently-active optimized variants.
+
+    Single-name mode keeps the legacy 'optimized_path_yaw' so existing analyses
+    are unchanged. Multi-name mode (e.g. w_occ + depthmap together) keys each
+    variant under its own directory name so they appear as distinct series.
+    """
+    if len(OPTIMIZED_DIR_NAMES) <= 1:
+        return ('optimized_path_yaw',)
+    if set(OPTIMIZED_DIR_NAMES) <= set(_DEFAULT_OPTIMIZED_DIR_NAMES):
+        return ('optimized_path_yaw',)
+    return tuple(OPTIMIZED_DIR_NAMES)
+
+
+def _key_for_optimized_dirname(dirname):
+    keys = _active_optimized_keys()
+    if keys == ('optimized_path_yaw',):
+        return 'optimized_path_yaw'
+    return dirname if dirname in keys else None
+
+
+def _is_active_optimized_key(name):
+    return name in _active_optimized_keys()
+
+
+def _default_label_for_optimized_key(key):
+    if key in ('optimized_path_yaw', 'optimized'):
+        return 'ours'
+    short = key
+    for prefix in ('optimized_',):
+        if short.startswith(prefix):
+            short = short[len(prefix):]
+            break
+    short = short.replace('_', ' ')
+    return 'ours ({})'.format(short)
+
+
+_OPTIMIZED_DEFAULT_COLORS = (
+    'orange', 'red', 'magenta', 'purple', 'brown', 'darkgoldenrod',
+)
+_OPTIMIZED_DEFAULT_LINESTYLES = ('dashed', 'dotted', 'dashdot', 'solid')
+
 # Exclude only optimized from analysis outputs.
 EXCLUDE_OPTIMIZED = True
 OPTIMIZED_TYPE = 'optimized'
@@ -332,22 +375,26 @@ def _avg_pair(a, b):
     return float(sum(vals) / len(vals))
 
 def _plot_legend_label(type_key, base_cfg):
-    if type_key in ('optimized_path_yaw', 'optimized'):
-        return 'ours'
     labels = base_cfg.get('labels') if isinstance(base_cfg, dict) else None
     if isinstance(labels, dict) and type_key in labels:
         return str(labels[type_key])
+    if type_key in ('optimized_path_yaw', 'optimized'):
+        return 'ours'
+    if _is_active_optimized_key(type_key):
+        return _default_label_for_optimized_key(type_key)
     return type_key
 
 
 def _paper_label(name, base_cfg):
+    labels = base_cfg.get('labels') if isinstance(base_cfg, dict) else None
+    if isinstance(labels, dict) and name in labels:
+        return str(labels[name])
     if name in ('optimized_path_yaw', 'optimized'):
         return 'ours'
     if name == 'none':
         return 'no info'
-    labels = base_cfg.get('labels') if isinstance(base_cfg, dict) else None
-    if isinstance(labels, dict) and name in labels:
-        return str(labels[name])
+    if _is_active_optimized_key(name):
+        return _default_label_for_optimized_key(name)
     return name
 
 
@@ -781,7 +828,10 @@ def _write_error_stats_penalized_csv(out_dir, plot_suffix, ordered_types, trans_
 
 
 def _write_compare_vs_optimized(out_dir, plot_suffix, ordered_types, trans_stats, rot_stats):
-    ref_type = 'optimized_path_yaw'
+    ref_type = next(
+        (k for k in _active_optimized_keys() if k in trans_stats and k in rot_stats),
+        'optimized_path_yaw',
+    )
     if ref_type not in trans_stats or ref_type not in rot_stats:
         return
     out_fn = os.path.join(out_dir, 'overall_error_compare_vs_optimized{}.csv'.format(plot_suffix))
@@ -844,7 +894,10 @@ def _print_error_stats_summary_penalized(ordered_types, trans_stats, rot_stats):
         ))
 
 def _print_compare_vs_optimized_summary(ordered_types, trans_stats, rot_stats):
-    ref_type = 'optimized_path_yaw'
+    ref_type = next(
+        (k for k in _active_optimized_keys() if k in trans_stats and k in rot_stats),
+        'optimized_path_yaw',
+    )
     if ref_type not in trans_stats or ref_type not in rot_stats:
         return
     print(Fore.YELLOW + "Comparison vs {} (mean diff / ratio):".format(ref_type))
@@ -902,16 +955,23 @@ def _inferTypesFromSubdirs(subdir_nms, base_cfg):
 def _ensureOptimizedPathYawStyle(cfg):
     if 'labels' not in cfg or 'colors' not in cfg or 'linestyles' not in cfg:
         return
-    if 'optimized_path_yaw' not in cfg['labels']:
-        cfg['labels']['optimized_path_yaw'] = 'ours'
-    if 'optimized_path_yaw' not in cfg['colors']:
-        cfg['colors']['optimized_path_yaw'] = cfg['colors'].get('optimized', 'orange')
-    if 'optimized_path_yaw' not in cfg['linestyles']:
-        cfg['linestyles']['optimized_path_yaw'] = 'dashed'
+    keys = _active_optimized_keys()
+    base_color = cfg['colors'].get('optimized', 'orange')
+    for idx, key in enumerate(keys):
+        if key not in cfg['labels']:
+            cfg['labels'][key] = _default_label_for_optimized_key(key)
+        if key not in cfg['colors']:
+            cfg['colors'][key] = (
+                base_color if idx == 0 else
+                _OPTIMIZED_DEFAULT_COLORS[idx % len(_OPTIMIZED_DEFAULT_COLORS)]
+            )
+        if key not in cfg['linestyles']:
+            cfg['linestyles'][key] = _OPTIMIZED_DEFAULT_LINESTYLES[
+                idx % len(_OPTIMIZED_DEFAULT_LINESTYLES)
+            ]
     if 'ordered_types' in cfg:
-        if 'optimized_path_yaw' in cfg['ordered_types']:
-            cfg['ordered_types'] = [v for v in cfg['ordered_types'] if v != 'optimized_path_yaw']
-        cfg['ordered_types'].append('optimized_path_yaw')
+        cfg['ordered_types'] = [v for v in cfg['ordered_types'] if v not in keys]
+        cfg['ordered_types'].extend(list(keys))
 
 
 def _collectSubdirs(cfg_dir):
@@ -954,7 +1014,11 @@ def _accumulateOptimizedPathYaw(top_dir, acc_trans_e, acc_rot_e, base_cfg):
     max_trans = base_cfg.get('max_trans_e_m', base_cfg.get('hist_max_trans_e', float('nan')))
     max_rot = base_cfg.get('max_rot_e_deg', base_cfg.get('hist_max_rot_e', float('nan')))
     for root, _, files in os.walk(top_dir):
-        if not _is_optimized_dirname(os.path.basename(root)):
+        dirname = os.path.basename(root)
+        if not _is_optimized_dirname(dirname):
+            continue
+        key = _key_for_optimized_dirname(dirname)
+        if key is None:
             continue
         err_fn = None
         if pose_e_path_yaw_nm in files:
@@ -966,18 +1030,23 @@ def _accumulateOptimizedPathYaw(top_dir, acc_trans_e, acc_rot_e, base_cfg):
         if not _poseErrorHasData(err_fn):
             continue
         _, trans_e_i, rot_e_i = _loadPoseError(err_fn, max_trans, max_rot)
-        acc_trans_e.setdefault('optimized_path_yaw', []).extend(trans_e_i)
-        acc_rot_e.setdefault('optimized_path_yaw', []).extend(rot_e_i)
+        acc_trans_e.setdefault(key, []).extend(trans_e_i)
+        acc_rot_e.setdefault(key, []).extend(rot_e_i)
 
 def _collectOptimizedPathYawForCfg(cfg_dir, base_cfg):
+    """Return per-key dicts of translation/rotation errors found under cfg_dir."""
     if not base_cfg:
-        return [], []
+        return {}, {}
     max_trans = base_cfg.get('max_trans_e_m', base_cfg.get('hist_max_trans_e', float('nan')))
     max_rot = base_cfg.get('max_rot_e_deg', base_cfg.get('hist_max_rot_e', float('nan')))
-    trans_all = []
-    rot_all = []
+    trans_by_key = {}
+    rot_by_key = {}
     for root, _, files in os.walk(cfg_dir):
-        if not _is_optimized_dirname(os.path.basename(root)):
+        dirname = os.path.basename(root)
+        if not _is_optimized_dirname(dirname):
+            continue
+        key = _key_for_optimized_dirname(dirname)
+        if key is None:
             continue
         err_fn = None
         if pose_e_path_yaw_nm in files:
@@ -989,9 +1058,9 @@ def _collectOptimizedPathYawForCfg(cfg_dir, base_cfg):
         if not _poseErrorHasData(err_fn):
             continue
         _, trans_e_i, rot_e_i = _loadPoseError(err_fn, max_trans, max_rot)
-        trans_all.extend(trans_e_i)
-        rot_all.extend(rot_e_i)
-    return trans_all, rot_all
+        trans_by_key.setdefault(key, []).extend(trans_e_i)
+        rot_by_key.setdefault(key, []).extend(rot_e_i)
+    return trans_by_key, rot_by_key
 
 
 def analyzeSingleCfg(cfg_dir, hide_x=False, base_cfg=None,
@@ -1372,13 +1441,17 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
                 merge_cfg = os.path.join(os.path.abspath(merge_root), cfg_key)
                 if os.path.isdir(merge_cfg):
                     t_ex, r_ex = _collectOptimizedPathYawForCfg(merge_cfg, base_ana_cfg)
-                    t_py = list(t_py) + list(t_ex)
-                    r_py = list(r_py) + list(r_ex)
+                    for k, vs in t_ex.items():
+                        t_py.setdefault(k, []).extend(vs)
+                    for k, vs in r_ex.items():
+                        r_py.setdefault(k, []).extend(vs)
             if t_py or r_py:
                 trans_e_i = dict(trans_e_i)
                 rot_e_i = dict(rot_e_i)
-                trans_e_i['optimized_path_yaw'] = t_py
-                rot_e_i['optimized_path_yaw'] = r_py
+                for k, vs in t_py.items():
+                    trans_e_i[k] = vs
+                for k, vs in r_py.items():
+                    rot_e_i[k] = vs
         per_cfg_stats[cfg_key] = (trans_e_i, rot_e_i)
         for k, v in trans_e_i.items():
             if k not in acc_trans_e:
@@ -1391,7 +1464,7 @@ def _analyzeMultipleCfgs(top_dir, base_ana_cfg, args, wandb_mod=None,
             else:
                 acc_rot_e[k].extend(v)
     _accumulateOptimizedPathYaw(top_dir, acc_trans_e, acc_rot_e, base_ana_cfg)
-    if 'optimized_path_yaw' in acc_trans_e or 'optimized_path_yaw' in acc_rot_e:
+    if any(k in acc_trans_e or k in acc_rot_e for k in _active_optimized_keys()):
         _ensureOptimizedPathYawStyle(base_ana_cfg)
     print(Fore.YELLOW + "<<< Finished all configurations.")
     print(Fore.YELLOW + "2. Gathered translation and rotation errors:")
