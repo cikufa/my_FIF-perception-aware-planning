@@ -39,15 +39,15 @@ paths:
 
 # Catalogues (reference; must match files in <warehouse_params_dir>/).
 trajectories_all:
-  - warehouse_top
-  - warehouse_diagonal
-  - warehouse_bottom
+  # - warehouse_top
+  # - warehouse_diagonal
+  # - warehouse_bottom
   - warehouse_left
   - warehouse_right
   - warehouse_mid
   - warehouse_side
-  - warehouse_smallU
-  - warehouse_bigU
+  # - warehouse_smallU
+  # - warehouse_bigU
 
 variations_all:
   - none
